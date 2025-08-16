@@ -1,0 +1,103 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribución / empaquetado
+.build/
+build/
+dist/
+downloads/
+.eggs/
+*.egg-info/
+*.egg
+wheels/
+share/python-wheels/
+.installed.cfg
+
+# PyInstaller
+*.spec
+*.manifest
+
+# Logs / cache
+*.log
+logs/
+.cache/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Test / cobertura / herramientas estáticas
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+.mypy_cache/
+.pytype/
+.pyre/
+junit.xml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+.conda/
+.venv-*/
+
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# IDEs / OS
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- ANTLR (archivos generados) ---
+/program/.antlr/
+/program/Compiscript*.py
+/program/*.interp
+/program/*.tokens
+/program/*.class
+# Si llegas a generar Java por accidente
+/program/*.java
+
+# Salidas de AST/visualizaciones (Graphviz, etc.)
+/program/ast.dot
+/program/ast.png
+/program/ast.svg
+
+# Artefactos temporales del runner/driver
+/program/__pycache__/
+program.out
+*.tmp
+
+# --- Docker ---
+# (mantén Dockerfile y docker-compose.yml versionados)
+docker-data/
+*.pid
+
+# --- Frontend/IDE web (si lo agregas) ---
+**/node_modules/
+**/.turbo/
+**/.next/
+**/.nuxt/
+**/dist/
+**/build/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
