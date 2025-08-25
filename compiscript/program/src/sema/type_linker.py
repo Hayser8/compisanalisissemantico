@@ -37,17 +37,15 @@ class TypeLinker:
             elif isinstance(sym, FunctionSymbol):
                 sym.resolved_return = self._resolve_return(sym.return_ann)
             elif isinstance(sym, ClassSymbol):
-                # Resolver base
                 if sym.base_name:
                     base_sym = self.global_scope.resolve(sym.base_name)
                     if not isinstance(base_sym, ClassSymbol):
-                        # usar ctx de la clase si está disponible en decl
                         ctx = self.decl.class_nodes.get(sym.name)
                         self.reporter.error(E_UNKNOWN_TYPE, f"Clase base desconocida: {sym.base_name}", ctx=ctx)
                     else:
                         sym.resolved_base_type = ClassType(sym.base_name)
 
-        # Clases: miembros (campos y métodos)
+        # Clases: campos y métodos
         for cname, cscope in self.decl.class_scopes.items():
             for _, ms in cscope.items():
                 if isinstance(ms, FieldSymbol):
@@ -56,8 +54,20 @@ class TypeLinker:
                 elif isinstance(ms, FunctionSymbol):
                     ms.resolved_return = self._resolve_return(ms.return_ann)
 
-        # Parámetros: funciones top-level y métodos (usamos los function_scopes recolectados)
+        # === NUEVO: parámetros y returns de TODAS las funciones en todos los FunctionScope ===
         for key, fnscope in self.decl.function_scopes.items():
+            # a) Resolver tipos de parámetros del scope
+            for _, sym in fnscope.items():
+                if isinstance(sym, ParamSymbol) and sym.type_ann:
+                    sym.resolved_type = self._parse_type_str(sym.type_ann)
+
+            # b) Asegurar el return de la función dueña del scope (anidadas, métodos, top-level)
+            parent = fnscope.parent
+            if parent:
+                fsym = parent.resolve_local(fnscope.name)
+                if isinstance(fsym, FunctionSymbol):
+                    # si ya fue resuelto antes no pasa nada por re-asignar el mismo valor
+                    fsym.resolved_return = self._resolve_return(fsym.return_ann)
             for _, ps in fnscope.items():
                 if isinstance(ps, ParamSymbol) and ps.type_ann:
                     ps.resolved_type = self._parse_type_str(ps.type_ann)
