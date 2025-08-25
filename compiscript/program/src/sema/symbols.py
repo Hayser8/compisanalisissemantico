@@ -42,6 +42,7 @@ class ParamSymbol(Symbol):
 class FieldSymbol(Symbol):
     kind: str = field(default="field", init=False)
     resolved_type: Optional["Type"] = None
+    mutable: bool = True
 
 
 @dataclass
@@ -53,6 +54,8 @@ class FunctionSymbol(Symbol):
     is_constructor: bool = False
     # Retorno resuelto (TypeLinker lo llena)
     resolved_return: Optional["Type"] = None
+    # ⬇️ NUEVO: variables/params capturados desde funciones externas
+    captured: set[str] = field(default_factory=set)
 
     def signature(self) -> str:
         ps = ", ".join(p.type_ann if p.type_ann else "any" for p in self.params)

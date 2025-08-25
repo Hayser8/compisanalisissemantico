@@ -38,6 +38,15 @@ class Scope:
             s = s.parent
         return None
 
+    def resolve_with_scope(self, name: str):
+        s: Optional[Scope] = self
+        while s is not None:
+            hit = s._symbols.get(name)
+            if hit is not None:
+                return hit, s
+            s = s.parent
+        return None, None
+
     # Utilidades
     def __contains__(self, name: str) -> bool:
         return name in self._symbols
@@ -110,3 +119,12 @@ class ScopeStack:
         cl = ClassScope(name=name, parent=self.current)
         self.push(cl)
         return cl
+
+    def current_function_scope(self) -> Optional[FunctionScope]:
+        for s in reversed(self._stack):
+            if isinstance(s, FunctionScope):
+                return s
+        return None
+
+    def function_path(self) -> list[str]:
+        return [s.name for s in self._stack if isinstance(s, FunctionScope)]
