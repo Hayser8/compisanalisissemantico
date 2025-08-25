@@ -79,12 +79,18 @@ class DeclarationCollector(CompiscriptVisitor):
 
     # ---- Declaraciones top-level ----
     def visitVariableDeclaration(self, ctx: CompiscriptParser.VariableDeclarationContext):
+        # ⬇️ Solo declaramos en global o clase (NO locales)
+        if self.current_scope.kind not in ("global", "class"):
+            return None
         name = ctx.Identifier().getText()
         tann = _type_to_str(_get_type_from_typeAnnotation(ctx.typeAnnotation()))
         self.declare_or_error(VariableSymbol(name=name, type_ann=tann), ctx)
         return None
 
     def visitConstantDeclaration(self, ctx: CompiscriptParser.ConstantDeclarationContext):
+        # ⬇️ Solo declaramos en global o clase (NO locales)
+        if self.current_scope.kind not in ("global", "class"):
+            return None
         name = ctx.Identifier().getText()
         tann = _type_to_str(_get_type_from_typeAnnotation(ctx.typeAnnotation()))
         self.declare_or_error(ConstSymbol(name=name, type_ann=tann), ctx)
@@ -96,10 +102,14 @@ class DeclarationCollector(CompiscriptVisitor):
         fn_sym = FunctionSymbol(name=name, return_ann=ret_ann, is_method=is_method)
         self.declare_or_error(fn_sym, ctx)
 
-        # Scope de función solo para parámetros (aún no chequeamos cuerpo)
+        # Scope de función para parámetros
         fn_scope = FunctionScope(name=name, parent=self.current_scope)
-        self.function_scopes[self._fn_key(fn_sym)] = fn_scope
 
+        # ⬇️ KEY ÚNICA según contexto (global / anidada / en método)
+        key = self._qualified_fn_key(name)
+        self.function_scopes[key] = fn_scope
+
+        # Parámetros
         if ctx.parameters():
             seen = set()
             for pctx in ctx.parameters().parameter():
@@ -113,6 +123,12 @@ class DeclarationCollector(CompiscriptVisitor):
                 if not fn_scope.declare(psym):
                     self.reporter.error(E_DUPLICATE_PARAM, f"Parámetro duplicado: {pname}", pctx)
                 fn_sym.params.append(psym)
+
+        # ⬇️ Entrar al scope de función SOLO para recorrer y encontrar funciones anidadas
+        self.push(fn_scope)
+        if ctx.block():
+            self.visit(ctx.block())  # esto recorrerá y llamará visitFunctionDeclaration en anidadas
+        self.pop()
         return None
 
     # ---- Clases y miembros ----
@@ -154,6 +170,12 @@ class DeclarationCollector(CompiscriptVisitor):
                         psym = ParamSymbol(name=pname, type_ann=ptann)
                         if not m_scope.declare(psym):
                             self.reporter.error(E_DUPLICATE_PARAM, f"Parámetro duplicado: {pname}", pctx)
+                        msym.params.append(psym)
+                # ⬇️ RECORRER CUERPO DEL MÉTODO para detectar funciones anidadas
+                self.push(m_scope)
+                if fdecl.block():
+                    self.visit(fdecl.block())
+                self.pop()
             elif vdecl:
                 vname = vdecl.Identifier().getText()
                 tann = _type_to_str(_get_type_from_typeAnnotation(vdecl.typeAnnotation()))
@@ -161,7 +183,7 @@ class DeclarationCollector(CompiscriptVisitor):
             elif cdecl:
                 cname = cdecl.Identifier().getText()
                 tann = _type_to_str(_get_type_from_typeAnnotation(cdecl.typeAnnotation()))
-                self.declare_or_error(FieldSymbol(name=cname, type_ann=tann), cdecl)
+                self.declare_or_error(FieldSymbol(name=cname, type_ann=tann, mutable=False), cdecl)
         self.pop()
         return None
 
@@ -186,7 +208,21 @@ class DeclarationCollector(CompiscriptVisitor):
 
     # ---- Keys helper ----
     def _fn_key(self, fn: FunctionSymbol) -> str:
+        # Mantenemos compatibilidad para tests antiguos (top-level)
         return f"::{fn.name}"
 
     def _method_key(self, cls: str, m: str) -> str:
         return f"{cls}::{m}"
+
+    def _qualified_fn_key(self, name: str) -> str:
+        parts: List[str] = []
+        cls = None
+        for s in self.scope_stack:
+            if isinstance(s, ClassScope):
+                cls = s.name
+            elif isinstance(s, FunctionScope):
+                parts.append(s.name)
+        parts.append(name)
+        if cls:
+            return f"{cls}::" + "::".join(parts)
+        return "::" + "::".join(parts)
