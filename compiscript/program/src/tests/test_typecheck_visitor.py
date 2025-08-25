@@ -148,3 +148,63 @@ def test_const_reassign():
     """
     rep = analyze(code)
     assert E_ASSIGN_TO_CONST in _codes(rep)
+
+def test_float_literal_and_promotion_and_forbidden_float_to_int():
+    code = """
+    let f: float = 1.25;
+    let i: integer = 5;
+    i = f;                 // no permitido: float -> integer
+    let f2: float = i;     // permitido: int -> float (promoción)
+    let g: float = 12e-1;  // literal con exponente
+    let h: float = 12.0;   // literal con punto
+    let k = 1.0 + i;       // inferencia: float
+    """
+    rep = analyze(code)
+    cs = _codes(rep)
+    # Debe existir al menos la incompatibilidad por i = f
+    assert E_ASSIGN_INCOMPAT in cs, rep.summary()
+
+def test_mod_with_float_is_allowed_by_rules():
+    code = """
+    let r: float = 5.0 % 2;
+    """
+    rep = analyze(code)
+    assert not rep.has_errors(), rep.summary()
+
+def test_switch_condition_must_be_boolean():
+    code = """
+    switch (1) {
+      case 1:
+        let a: integer; a = 0;
+      default:
+        let b: integer; b = 1;
+    }
+    """
+    rep = analyze(code)
+    assert E_COND_NOT_BOOL in _codes(rep), rep.summary()
+
+def test_switch_boolean_condition_ok():
+    code = """
+    switch (true) {
+      case true:
+        let a: integer; a = 1;
+      default:
+        let b: integer; b = 2;
+    }
+    """
+    rep = analyze(code)
+    assert not rep.has_errors(), rep.summary()
+
+
+def test_nested_function_call_and_return_and_capture():
+    code = """
+    function outer(a: integer): integer {
+      let x: integer = 10;
+      function inner(b: integer): integer {
+        return a + x + b;
+      }
+      return inner(5);
+    }
+    """
+    rep = analyze(code)
+    assert not rep.has_errors(), rep.summary()
