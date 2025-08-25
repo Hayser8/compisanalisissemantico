@@ -195,7 +195,6 @@ def test_switch_boolean_condition_ok():
     rep = analyze(code)
     assert not rep.has_errors(), rep.summary()
 
-
 def test_nested_function_call_and_return_and_capture():
     code = """
     function outer(a: integer): integer {
