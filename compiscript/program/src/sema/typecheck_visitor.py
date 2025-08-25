@@ -72,6 +72,34 @@ class TypeCheckVisitor(CompiscriptVisitor):
     def _require_boolean(self, t: Type, ctx: ParserRuleContext):
         if not is_boolean(t):
             self.rep.error(E_COND_NOT_BOOL, f"Se requiere boolean, recibido {t}", ctx)
+    
+    def _current_function_scope(self) -> Optional[FunctionScope]:
+        return self.scopes.current_function_scope()
+    
+    def _fn_key_for_current_context(self, fname: str, is_method: bool) -> str:
+        # Construye la misma key que el DeclarationCollector
+        path = self.scopes.function_path()  # funciones externas en cadena
+        parts = list(path) + [fname]
+        if self.current_class is not None:
+            # Si es método al nivel de clase (no anidado), coincide con "Class::fname"
+            if not path and is_method:
+                return f"{self.current_class.name}::{fname}"
+            return f"{self.current_class.name}::" + "::".join(parts)
+        return "::" + "::".join(parts)
+
+    def _maybe_capture(self, name: str, decl_scope: Optional[Scope]) -> None:
+        if self.current_function is None or decl_scope is None:
+            return
+        # Capturamos SOLO si viene de un scope de función externo distinto al actual
+        if not isinstance(decl_scope, FunctionScope):
+            return
+        cur_fn_scope = self._current_function_scope()
+        if cur_fn_scope is None:
+            return
+        if decl_scope is cur_fn_scope:
+            return
+        # Registrar captura en el símbolo de la función actual
+        self.current_function.captured.add(name)
 
     def _member_lookup(self, ctype: ClassType, member: str) -> Optional[Symbol]:
         """Busca miembro (campo/método) subiendo por la herencia."""
@@ -88,6 +116,22 @@ class TypeCheckVisitor(CompiscriptVisitor):
                 break
             cname = cls_sym.base_name
         return None
+
+    def _qualified_key_from_decl_scope(self, decl_scope: Scope, fname: str) -> str:
+        parts = []
+        cls = None
+        s = decl_scope
+        while s is not None:
+            if isinstance(s, FunctionScope):
+                parts.append(s.name)
+            elif isinstance(s, ClassScope):
+                cls = s.name
+            s = s.parent
+        parts = list(reversed(parts))
+        parts.append(fname)
+        if cls:
+            return f"{cls}::" + "::".join(parts)
+        return "::" + "::".join(parts)
 
     # ===== Entrypoint =====
 
@@ -202,9 +246,11 @@ class TypeCheckVisitor(CompiscriptVisitor):
         return True
 
     def visitSwitchStatement(self, ctx: CompiscriptParser.SwitchStatementContext):
-        # Semántica conservadora: no garantizamos return.
-        # (Si quisieras exigir boolean aquí, llama _require_boolean al expression())
-        self.visit(ctx.expression())
+        # Ahora exigimos que la condición del switch sea boolean
+        cond_t = self.visit(ctx.expression())
+        if cond_t is not None:
+            self._require_boolean(cond_t, ctx.expression())
+        # Recorremos los bloques de los cases y default (no garantizamos return)
         for case in ctx.switchCase():
             for st in case.statement():
                 self.visit(st)
@@ -280,35 +326,38 @@ class TypeCheckVisitor(CompiscriptVisitor):
         fname = ctx.Identifier().getText()
         # Determinar si es método (estamos en scope de clase)
         is_method = self.scope.kind == "class" and isinstance(self.current_class, ClassSymbol)
-        # Busca el scope de parámetros preparado por DeclarationCollector
-        key = f"{self.current_class.name}::{fname}" if is_method else f"::{fname}"
+
+        # ⬇️ usar key calificada (soporta anidadas)
+        key = self._fn_key_for_current_context(fname, is_method=is_method)
         fn_scope: FunctionScope = self.decl.function_scopes[key]
-        # set contexto
+
+        if fn_scope.parent is not self.scope:
+            fn_scope.parent = self.scope
+
         prev_func = self.current_function
         prev_class = self.current_class
-        # current_function symbol en global/clase es el ya declarado
+
         fn_sym = self.scope.resolve(fname)
         if not isinstance(fn_sym, FunctionSymbol):
             fn_sym = FunctionSymbol(name=fname)  # fallback
+
         self.current_function = fn_sym
-        # Si estamos dentro de una clase, aseguremos current_class (si no lo estaba)
-        if is_method and prev_class is None:
-            # Identifica la clase actual leyendo el scope
-            if isinstance(self.scope, ClassScope):
-                self.current_class = self.decl.global_scope.resolve(self.scope.name)  # ClassSymbol
+
+        # Si estamos dentro de una clase y no se seteo current_class aún:
+        if is_method and prev_class is None and isinstance(self.scope, ClassScope):
+            self.current_class = self.decl.global_scope.resolve(self.scope.name)  # ClassSymbol
+
         # Empuja scope de función
         self.scopes.push(fn_scope)
-        # Soportar 'this' en métodos
-        if is_method and isinstance(self.current_class, ClassSymbol):
-            # no insertamos símbolo explícito; resolvemos 'this' ad-hoc
-            pass
         # Visitar cuerpo
         must_return = self.visit(ctx.block())
         self.scopes.pop()
-        # Validar retorno obligatorio
+
+        # Validar return obligatorio
         expected = fn_sym.resolved_return or VOID
         if expected != VOID and not must_return:
             self.rep.error(E_MISSING_RETURN, f"Falta return en todos los caminos para {expected}", ctx)
+
         # restaurar contexto
         self.current_function = prev_func
         self.current_class = prev_class
@@ -366,6 +415,10 @@ class TypeCheckVisitor(CompiscriptVisitor):
         mem = self._member_lookup(obj_t, prop)
         if not isinstance(mem, FieldSymbol):
             self.rep.error(E_MEMBER_NOT_FOUND, f"Propiedad '{prop}' no existe", ctx)
+            return False
+        
+        if isinstance(mem, FieldSymbol) and not getattr(mem, "mutable", True):
+            self.rep.error(E_ASSIGN_TO_CONST, f"No se puede reasignar const '{prop}'", ctx)
             return False
 
         dst_t = getattr(mem, "resolved_type", None)
@@ -470,9 +523,13 @@ class TypeCheckVisitor(CompiscriptVisitor):
             return BOOLEAN
         if ctx.Literal():
             text = ctx.Literal().getText()
-            # Si empieza/termina con comillas -> string, si no -> integer
+            # String si está entre comillas
             if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
                 return STRING
+            # Float si contiene punto o exponente (según gramática: FloatLiteral va primero)
+            if any(ch in text for ch in ('.', 'e', 'E')):
+                return FLOAT
+            # Si no, es entero
             return INTEGER
         if ctx.arrayLiteral():
             return self._eval_array_literal(ctx.arrayLiteral())
@@ -500,22 +557,28 @@ class TypeCheckVisitor(CompiscriptVisitor):
         return array_of(t0 or VOID)
 
     def _eval_left_hand_side(self, ctx: CompiscriptParser.LeftHandSideContext):
-        # primaryAtom (suffixOp)*
         atom = ctx.primaryAtom()
 
-        # ---------- 1) Resolver el átomo ----------
         # a) Identificador
         if isinstance(atom, P.IdentifierExprContext):
             name = atom.Identifier().getText()
-            sym = self._resolve_var(atom, name)
-            if isinstance(sym, (VariableSymbol, ConstSymbol, ParamSymbol, FieldSymbol)):
-                base_t = self._type_of_symbol(sym)
-            elif isinstance(sym, FunctionSymbol):
-                base_t = None  # función; se manejará al ver CallExpr
-            elif isinstance(sym, ClassSymbol):
-                base_t = ClassType(sym.name)
-            else:
+            # ⬇️ usamos resolve_with_scope para saber DÓNDE estaba el símbolo
+            sym, decl_scope = self.scope.resolve_with_scope(name)
+            if sym is None:
+                self.rep.error(E_UNDECLARED, f"Identificador no declarado: {name}", atom)
                 base_t = None
+            else:
+                # Posible captura si es var/param/const de función externa
+                if isinstance(sym, (VariableSymbol, ConstSymbol, ParamSymbol)):
+                    self._maybe_capture(name, decl_scope)
+                if isinstance(sym, (VariableSymbol, ConstSymbol, ParamSymbol, FieldSymbol)):
+                    base_t = self._type_of_symbol(sym)
+                elif isinstance(sym, FunctionSymbol):
+                    base_t = None
+                elif isinstance(sym, ClassSymbol):
+                    base_t = ClassType(sym.name)
+                else:
+                    base_t = None
 
         # b) new Clase(args)
         elif isinstance(atom, P.NewExprContext):
@@ -563,11 +626,12 @@ class TypeCheckVisitor(CompiscriptVisitor):
                 # ¿estamos llamando a un identificador de función top-level?
                 if isinstance(atom, P.IdentifierExprContext) and base_t is None:
                     fname = atom.Identifier().getText()
-                    fsym = self.scope.resolve(fname)
+                    fsym, decl_scope = self.scope.resolve_with_scope(fname)
                     if not isinstance(fsym, FunctionSymbol):
                         self.rep.error(E_UNDECLARED, f"Llamada a '{fname}' que no es función", s)
                         return None
-                    fscope = self.decl.function_scopes.get(f"::{fname}")
+                    key = self._qualified_key_from_decl_scope(decl_scope, fname) if decl_scope else f"::{fname}"
+                    fscope = self.decl.function_scopes.get(key)
                     params = []
                     if fscope:
                         for p in fsym.params:
@@ -666,6 +730,9 @@ class TypeCheckVisitor(CompiscriptVisitor):
                 self.rep.error(E_MEMBER_NOT_FOUND, f"Propiedad '{prop}' no existe", ctx)
                 return rhs_t
             dst_t = getattr(mem, "resolved_type", None)
+            if isinstance(mem, FieldSymbol) and not getattr(mem, "mutable", True):
+                self.rep.error(E_ASSIGN_TO_CONST, f"No se puede reasignar const '{prop}'", ctx)
+                return dst_t or rhs_t
             if dst_t and rhs_t and not is_assignable(rhs_t, dst_t):
                 self.rep.error(E_ASSIGN_INCOMPAT, f"No se puede asignar {rhs_t} a {dst_t}", ctx.assignmentExpr())
             return dst_t or rhs_t
