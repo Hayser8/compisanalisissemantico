@@ -1,12 +1,15 @@
 from __future__ import annotations
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QTextCursor
+from PySide6.QtCore import Qt, QIODevice, QByteArray
+from PySide6.QtGui import QAction, QTextCursor, QPixmap
 from PySide6.QtWidgets import (
     QMainWindow, QFileDialog, QTabWidget, QTreeView,
     QToolBar, QMessageBox, QTreeWidget, QTreeWidgetItem, QStatusBar,
-    QSplitter, QPlainTextEdit, QFileSystemModel, QApplication
+    QSplitter, QPlainTextEdit, QFileSystemModel, QApplication,
+    QLabel, QScrollArea
 )
+from PySide6.QtCore import QProcess
 import os
+
 from editor import CodeEditor, CompiscriptHighlighter
 from runner import CliRunner, find_defaults
 from theming import apply_theme
@@ -65,7 +68,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.outline)
         splitter.setSizes([250, 700, 250])
 
-        # Bottom dock: Problems / Output / Reporte
+        # Bottom dock: Problems / Output / Report / Tree
         self.problems = QTreeWidget(self)
         self.problems.setHeaderLabels(["Code", "Line", "Col", "Message"])
         self.problems.itemActivated.connect(self.on_problem_jump)
@@ -76,17 +79,25 @@ class MainWindow(QMainWindow):
         self.pretty = QPlainTextEdit(self)   # reporte legible
         self.pretty.setReadOnly(True)
 
+        # --- NUEVA pestaña: Tree (Imagen del AST) ---
+        self.astLabel = QLabel("AST image will appear here")
+        self.astLabel.setAlignment(Qt.AlignCenter)
+        self.astScroll = QScrollArea(self)
+        self.astScroll.setWidgetResizable(True)
+        self.astScroll.setWidget(self.astLabel)
+
         bottom = QTabWidget(self)
         bottom.addTab(self.problems, "Problems")
         bottom.addTab(self.output, "Output")
-        bottom.addTab(self.pretty, "Reporte")
+        bottom.addTab(self.pretty, "Report")
+        bottom.addTab(self.astScroll, "Tree")
 
         from PySide6.QtWidgets import QDockWidget
-        dock = QDockWidget("Problems / Output / Reporte", self)
+        dock = QDockWidget("Problems / Output / Report / Tree", self)
         dock.setWidget(bottom)
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
 
-        # Runner
+        # Runner (para análisis)
         self.runner = CliRunner(self)
         self.runner.output.connect(self.append_output)
         self.runner.finished.connect(self.on_run_finished)
@@ -104,6 +115,11 @@ class MainWindow(QMainWindow):
         self.append_output(f"[IDE] defaults: cli={defs.get('cli_path')}\n")
         self.append_output(f"[IDE] defaults: program_dir={defs.get('program_dir')}\n")
         self.append_output(f"[IDE] defaults: python={defs.get('python_path')}\n")
+
+        # QProcess para AST (cadena: ast_dump -> dot)
+        self._proc_ast_dump: QProcess | None = None
+        self._proc_dot: QProcess | None = None
+        self._last_dot: str = ""
 
     # ---- File ops ----
     def _current_editor(self) -> CodeEditor | None:
@@ -191,11 +207,15 @@ class MainWindow(QMainWindow):
             self.problems.clear()
             self.outline.clear()
             self.pretty.clear()
+            self.astLabel.setText("Generating AST…")
 
             abs_path = os.path.abspath(path)
             self.append_output("[IDE] Run clicked\n")
             self.append_output(f"[IDE] Running on {abs_path}\n")
             self.runner.run_file(abs_path)
+
+            # En paralelo (o después) generamos el AST visual
+            self.generate_ast_image(abs_path)
         except Exception as e:
             self.append_output(f"[IDE] on_run exception: {e!r}\n")
 
@@ -276,6 +296,98 @@ class MainWindow(QMainWindow):
                 lines.append(f"  {kind} {name}{suffix}")
 
         self.pretty.setPlainText("\n".join(lines))
+
+    # ---- AST visual (DOT -> PNG) ----
+    def generate_ast_image(self, cps_path: str):
+        """Lanza dos procesos: (1) python -m src.tools.ast_dump <file.cps>  (2) dot -Tpng"""
+        # Limpia procesos previos
+        if self._proc_ast_dump:
+            self._proc_ast_dump.kill()
+        if self._proc_dot:
+            self._proc_dot.kill()
+        self._last_dot = ""
+
+        py = self.defaults.get("python_path")
+        workdir = self.program_dir or os.path.dirname(cps_path)
+
+        # 1) Obtener DOT
+        self._proc_ast_dump = QProcess(self)
+        self._proc_ast_dump.setWorkingDirectory(workdir)
+        self._proc_ast_dump.setProgram(py)
+        self._proc_ast_dump.setArguments(["-m", "src.tools.ast_dump", cps_path])
+        self._proc_ast_dump.setProcessChannelMode(QProcess.MergedChannels)
+
+        def on_ast_ready():
+            out = bytes(self._proc_ast_dump.readAllStandardOutput()).decode("utf-8", errors="replace")
+            if out:
+                self._last_dot += out
+
+        def on_ast_finished(_code, _status):
+            on_ast_ready()  # drenar
+            dot_txt = (self._last_dot or "").strip()
+            if not dot_txt or "digraph" not in dot_txt:
+                self.astLabel.setText("No se pudo generar DOT del AST.\n¿Está correcto el archivo?\n\nSalida:\n" + (self._last_dot or "(vacía)"))
+                return
+            # 2) Render con Graphviz (dot -Tpng)
+            self.render_dot_to_png(dot_txt, workdir)
+
+        self._proc_ast_dump.readyReadStandardOutput.connect(on_ast_ready)
+        self._proc_ast_dump.readyReadStandardError.connect(on_ast_ready)
+        self._proc_ast_dump.finished.connect(on_ast_finished)
+
+        self.append_output(f"[IDE] exec(py ast_dump): \"{py}\" -m src.tools.ast_dump \"{cps_path}\"\n")
+        self.append_output(f"[IDE] cwd(ast): {workdir}\n")
+        self._proc_ast_dump.start()
+
+    def render_dot_to_png(self, dot_text: str, workdir: str):
+        self._proc_dot = QProcess(self)
+        self._proc_dot.setWorkingDirectory(workdir)
+        self._proc_dot.setProgram("dot")           # requiere Graphviz instalado
+        self._proc_dot.setArguments(["-Tpng"])
+        self._proc_dot.setProcessChannelMode(QProcess.MergedChannels)
+
+        png_chunks: list[bytes] = []
+
+        def on_dot_out():
+            data = bytes(self._proc_dot.readAllStandardOutput())
+            if data:
+                png_chunks.append(data)
+            err = bytes(self._proc_dot.readAllStandardError())
+            if err:
+                # también agregamos a output IDE
+                self.append_output(err.decode("utf-8", errors="replace"))
+
+        def on_dot_finished(_code, _status):
+            on_dot_out()
+            if not png_chunks:
+                # Fallback: mostrar DOT como texto y sugerir instalar Graphviz
+                msg = (
+                    "No se pudo renderizar con Graphviz (dot).\n"
+                    "Instala Graphviz y asegúrate que 'dot' esté en PATH.\n\n"
+                    "DOT generado:\n\n"
+                )
+                self.astLabel.setText(msg + dot_text)
+                return
+            png_data = b"".join(png_chunks)
+            pix = QPixmap()
+            ok = pix.loadFromData(png_data, "PNG")
+            if not ok:
+                self.astLabel.setText("No se pudo cargar PNG del AST.\n")
+                return
+            self.astLabel.setPixmap(pix)
+            self.astLabel.adjustSize()
+
+        self._proc_dot.readyReadStandardOutput.connect(on_dot_out)
+        self._proc_dot.readyReadStandardError.connect(on_dot_out)
+        self._proc_dot.finished.connect(on_dot_finished)
+
+        # Enviar DOT por stdin
+        self._proc_dot.start()
+        if not self._proc_dot.waitForStarted(5000):
+            self.astLabel.setText("No se pudo iniciar 'dot'. ¿Está Graphviz instalado?")
+            return
+        self._proc_dot.write(dot_text.encode("utf-8"))
+        self._proc_dot.closeWriteChannel()
 
     # ---- Outline ----
     def populate_outline(self, symbols: dict):

@@ -163,6 +163,10 @@ class IntLiteral(Expr):
     value: int = 0
 
 @dataclass
+class FloatLiteral(Expr):   
+    value: float = 0.0 
+    
+@dataclass
 class StringLiteral(Expr):
     value: str = ""
 

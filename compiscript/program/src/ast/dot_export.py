@@ -9,13 +9,14 @@ class ASTDotExporter:
         self._id = 0
         self._map = {}
 
-    def _nid(self, n: A.Node) -> str:
-        if n in self._map:
-            return self._map[n]
-        self._id += 1
-        i = f"n{self._id}"
-        self._map[n] = i
-        return i
+    def _nid(self, n):
+        key = id(n)
+        if key in self._map:
+            return self._map[key]
+        nid = f"n{len(self._map)}"
+        self._map[key] = nid
+        return nid
+
 
     def _label(self, n: A.Node) -> str:
         # Etiquetas compactas por tipo

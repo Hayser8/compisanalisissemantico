@@ -57,16 +57,18 @@ class ASTBuilder(CompiscriptVisitor):
         return A.VarDecl(name=name, type_ann=type_ann, init=init, is_const=True, pos=_pos(ctx))
 
     def visitAssignment(self, ctx: CompiscriptParser.AssignmentContext):
-        # 'Identifier' '=' expr | expr '.' Identifier '=' expr
+        # 'Identifier' '=' expr
         if ctx.Identifier() and len(ctx.expression()) == 1:
             target = A.Identifier(name=ctx.Identifier().getText(), pos=_pos(ctx))
             value = self.visit(ctx.expression(0))
             return A.Assign(target=target, value=value, pos=_pos(ctx))
-        # obj.prop = value
+
+        # expr '.' Identifier '=' expr
         obj = self.visit(ctx.expression(0))
-        prop = A.PropertyAccessExpr(obj=obj, prop=ctx.Identifier(0).getText(), pos=_pos(ctx))
+        prop = A.PropertyAccessExpr(obj=obj, prop=ctx.Identifier().getText(), pos=_pos(ctx))
         value = self.visit(ctx.expression(1))
         return A.Assign(target=prop, value=value, pos=_pos(ctx))
+
 
     def visitExpressionStatement(self, ctx: CompiscriptParser.ExpressionStatementContext):
         return A.ExprStmt(expr=self.visit(ctx.expression()), pos=_pos(ctx))
@@ -136,14 +138,30 @@ class ASTBuilder(CompiscriptVisitor):
     def visitFunctionDeclaration(self, ctx: CompiscriptParser.FunctionDeclarationContext):
         name = ctx.Identifier().getText()
         is_ctor = (name == "constructor")
+
+        # --- params ---
         params: List[A.Param] = []
         if ctx.parameters():
             for p in ctx.parameters().parameter():
                 pann = None
-                if p.type():
-                    pann = p.type().getText()
+                # algunos targets generan p.type_() en vez de p.type()
+                tgetter = getattr(p, "type", None)
+                tctx = tgetter() if callable(tgetter) else None
+                if tctx is None:
+                    tgetter_ = getattr(p, "type_", None)
+                    tctx = tgetter_() if callable(tgetter_) else None
+                if tctx:
+                    pann = tctx.getText()
                 params.append(A.Param(name=p.Identifier().getText(), type_ann=pann, pos=_pos(p)))
-        ret_ann = ctx.type().getText() if ctx.type() else None
+
+        # --- return type ---
+        tgetter = getattr(ctx, "type", None)
+        tctx = tgetter() if callable(tgetter) else None
+        if tctx is None:
+            tgetter_ = getattr(ctx, "type_", None)
+            tctx = tgetter_() if callable(tgetter_) else None
+        ret_ann = tctx.getText() if tctx else None
+
         body = self.visit(ctx.block())
         return A.FunctionDecl(name=name, params=params, return_type=ret_ann, body=body, is_constructor=is_ctor, pos=_pos(ctx))
 
@@ -241,22 +259,35 @@ class ASTBuilder(CompiscriptVisitor):
         return self.visit(ctx.expression())
 
     def visitLiteralExpr(self, ctx: CompiscriptParser.LiteralExprContext):
-        text = ctx.getText()
-        if text == "null":
-            return A.NullLiteral(pos=_pos(ctx))
-        if text == "true":
-            return A.BoolLiteral(value=True, pos=_pos(ctx))
-        if text == "false":
-            return A.BoolLiteral(value=False, pos=_pos(ctx))
-        if ctx.Literal():
-            tok = ctx.Literal()
-            # Distinguir entero vs string por comillas
-            s = tok.getText()
-            if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-                return A.StringLiteral(value=s[1:-1], pos=_pos(ctx))
-            return A.IntLiteral(value=int(s), pos=_pos(ctx))
+        # array literal primero
         if ctx.arrayLiteral():
             return self.visit(ctx.arrayLiteral())
+        text = ctx.getText()
+        p = _pos(ctx)
+        # palabras clave
+        if text == "null":
+            return A.NullLiteral(pos=p)
+        if text == "true":
+            return A.BoolLiteral(value=True, pos=p)
+        if text == "false":
+            return A.BoolLiteral(value=False, pos=p)
+
+        # token Literal: puede ser string, entero o float
+        if ctx.Literal():
+            s = ctx.Literal().getText()
+
+            # string: "..."
+            if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+                return A.StringLiteral(value=s[1:-1], pos=p)
+
+            # numérico: float si contiene '.' o exponente
+            t = s.replace("_", "")
+            if any(c in t for c in (".", "e", "E")):
+                return A.FloatLiteral(value=float(t), pos=p)   # requiere A.FloatLiteral en nodes.py
+            else:
+                return A.IntLiteral(value=int(t), pos=p)
+
+        # fallback defensivo
         return None
 
     def visitArrayLiteral(self, ctx: CompiscriptParser.ArrayLiteralContext):
