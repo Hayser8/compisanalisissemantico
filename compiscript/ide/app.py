@@ -21,10 +21,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Compiscript IDE")
         self.resize(1200, 800)
         self.theme = "dark"
-        self.defaults = find_defaults()
+        self.defaults = find_defaults()               
         self.program_dir = self.defaults.get("program_dir", os.getcwd())
 
-        # Toolbar
         tb = QToolBar("Main")
         tb.setMovable(False)
         self.addToolBar(tb)
@@ -33,9 +32,10 @@ class MainWindow(QMainWindow):
         actSave = QAction("Save", self)
         actSaveAs = QAction("Save As", self)
         actRun = QAction("▶ Run", self)
-        actTheme = QAction("🌓 Theme", self)
+        actTheme = QAction("Theme", self)
         for a in (actOpenFolder, actNew, actSave, actSaveAs, actRun, actTheme):
             tb.addAction(a)
+        # Conexión de señales a slots
         actOpenFolder.triggered.connect(self.on_open_folder)
         actNew.triggered.connect(self.on_new_file)
         actSave.triggered.connect(self.on_save)
@@ -43,10 +43,10 @@ class MainWindow(QMainWindow):
         actRun.triggered.connect(self.on_run)
         actTheme.triggered.connect(self.on_toggle_theme)
 
-        # Layout: tree | editors | outline
         splitter = QSplitter(self)
         self.setCentralWidget(splitter)
 
+        # Árbol de archivos con filtro *.cps
         self.fsModel = QFileSystemModel(self)
         self.fsModel.setNameFilters(["*.cps", "*"])
         self.fsModel.setNameFilterDisables(False)
@@ -57,6 +57,7 @@ class MainWindow(QMainWindow):
         self.tree.doubleClicked.connect(self.on_tree_double)
         splitter.addWidget(self.tree)
 
+        # Pestañas de editores con botón de cerrar
         self.tabs = QTabWidget(self)
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self.on_close_tab)
@@ -68,18 +69,18 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.outline)
         splitter.setSizes([250, 700, 250])
 
-        # Bottom dock: Problems / Output / Report / Tree
+        # Panel de outputs
         self.problems = QTreeWidget(self)
         self.problems.setHeaderLabels(["Code", "Line", "Col", "Message"])
         self.problems.itemActivated.connect(self.on_problem_jump)
 
-        self.output = QPlainTextEdit(self)
+        self.output = QPlainTextEdit(self)    
         self.output.setReadOnly(True)
 
-        self.pretty = QPlainTextEdit(self)   # reporte legible
+        self.pretty = QPlainTextEdit(self)   
         self.pretty.setReadOnly(True)
 
-        # --- NUEVA pestaña: Tree (Imagen del AST) ---
+        # Visor de imagen para el AST (Graphviz)
         self.astLabel = QLabel("AST image will appear here")
         self.astLabel.setAlignment(Qt.AlignCenter)
         self.astScroll = QScrollArea(self)
@@ -97,31 +98,31 @@ class MainWindow(QMainWindow):
         dock.setWidget(bottom)
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
 
-        # Runner (para análisis)
+        # Runner: ejecuta cli.py (primero Python local; si falla, Docker)
         self.runner = CliRunner(self)
         self.runner.output.connect(self.append_output)
         self.runner.finished.connect(self.on_run_finished)
 
-        # Theme + initial workspace
+        # Tema + carpeta inicial
         apply_theme(QApplication.instance(), self.theme)
         if self.program_dir and os.path.isdir(self.program_dir):
             self._set_root(self.program_dir)
 
+        # Barra de estado
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
 
-        # Logs iniciales
+        # Logs de autodetección
         defs = find_defaults()
         self.append_output(f"[IDE] defaults: cli={defs.get('cli_path')}\n")
         self.append_output(f"[IDE] defaults: program_dir={defs.get('program_dir')}\n")
         self.append_output(f"[IDE] defaults: python={defs.get('python_path')}\n")
 
-        # QProcess para AST (cadena: ast_dump -> dot)
+        # Procesos para la generación del AST (DOT -> PNG)
         self._proc_ast_dump: QProcess | None = None
         self._proc_dot: QProcess | None = None
         self._last_dot: str = ""
 
-    # ---- File ops ----
     def _current_editor(self) -> CodeEditor | None:
         w = self.tabs.currentWidget()
         return w if isinstance(w, CodeEditor) else None
@@ -130,6 +131,7 @@ class MainWindow(QMainWindow):
         ed = self._current_editor()
         return getattr(ed, "file_path", None) if ed else None
 
+    # Abrir carpeta como raíz del árbol
     def on_open_folder(self):
         d = QFileDialog.getExistingDirectory(self, "Open Folder", self.program_dir or os.getcwd())
         if d:
@@ -140,12 +142,14 @@ class MainWindow(QMainWindow):
         idx = self.fsModel.setRootPath(folder)
         self.tree.setRootIndex(idx)
 
+    # Doble clic en árbol -> abrir archivo
     def on_tree_double(self, index):
         path = self.fsModel.filePath(index)
         if os.path.isdir(path):
             return
         self.open_file(path)
 
+    # Cargar archivo en nueva pestaña
     def open_file(self, path: str):
         with open(path, "r", encoding="utf-8") as f:
             text = f.read()
@@ -157,6 +161,7 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(ed)
         self.status.showMessage(f"Opened {path}", 3000)
 
+    # Crear archivo nuevo
     def on_new_file(self):
         from PySide6.QtWidgets import QInputDialog
         name, ok = QInputDialog.getText(self, "New File", "Name (e.g. main.cps)")
@@ -168,6 +173,7 @@ class MainWindow(QMainWindow):
             self._set_root(base)
             self.open_file(full)
 
+    # Guardar archivo actual
     def on_save(self):
         ed = self._current_editor()
         if not ed:
@@ -179,6 +185,7 @@ class MainWindow(QMainWindow):
             f.write(ed.toPlainText())
         self.status.showMessage(f"Saved {path}", 2000)
 
+    # Guardar como...
     def on_save_as(self):
         ed = self._current_editor()
         if not ed:
@@ -192,7 +199,7 @@ class MainWindow(QMainWindow):
             i = self.tabs.currentIndex()
             self.tabs.setTabText(i, os.path.basename(path))
 
-    # ---- Run ----
+    # ejecutar cli y genera ast
     def on_run(self):
         try:
             ed = self._current_editor()
@@ -201,7 +208,8 @@ class MainWindow(QMainWindow):
                 self.append_output("[IDE] No active editor or file path is empty\n")
                 QMessageBox.warning(self, "Run", "Open and save a .cps file first.")
                 return
-            # Save & clear
+
+            # Limpieza de paneles
             self.on_save()
             self.output.clear()
             self.problems.clear()
@@ -212,18 +220,21 @@ class MainWindow(QMainWindow):
             abs_path = os.path.abspath(path)
             self.append_output("[IDE] Run clicked\n")
             self.append_output(f"[IDE] Running on {abs_path}\n")
-            self.runner.run_file(abs_path)
 
-            # En paralelo (o después) generamos el AST visual
+            # 1) Corre el checker (CLI) -> Problems/Report/Outline
+            self.runner.run_file(abs_path)
+            # 2) Genera imagen del AST (DOT->PNG)
             self.generate_ast_image(abs_path)
         except Exception as e:
             self.append_output(f"[IDE] on_run exception: {e!r}\n")
 
+    # Añadir texto al panel Output
     def append_output(self, text: str):
         self.output.moveCursor(QTextCursor.End)
         self.output.insertPlainText(text)
         self.output.moveCursor(QTextCursor.End)
 
+    # CLI terminao
     def on_run_finished(self, data: dict):
         self.append_output(f"[IDE] finished; ok={data.get('ok', False)}\n")
 
@@ -241,7 +252,7 @@ class MainWindow(QMainWindow):
 
         self.status.showMessage("Run finished", 3000)
 
-    # ---- Reporte bonito ----
+    # Reporte 
     def update_pretty_report(self, data: dict):
         lines = []
         if not isinstance(data, dict):
@@ -297,10 +308,10 @@ class MainWindow(QMainWindow):
 
         self.pretty.setPlainText("\n".join(lines))
 
-    # ---- AST visual (DOT -> PNG) ----
     def generate_ast_image(self, cps_path: str):
         """Lanza dos procesos: (1) python -m src.tools.ast_dump <file.cps>  (2) dot -Tpng"""
-        # Limpia procesos previos
+
+        # Cancelar procesos previos
         if self._proc_ast_dump:
             self._proc_ast_dump.kill()
         if self._proc_dot:
@@ -310,7 +321,7 @@ class MainWindow(QMainWindow):
         py = self.defaults.get("python_path")
         workdir = self.program_dir or os.path.dirname(cps_path)
 
-        # 1) Obtener DOT
+        # (1) Ejecuta el generador DOT del AST
         self._proc_ast_dump = QProcess(self)
         self._proc_ast_dump.setWorkingDirectory(workdir)
         self._proc_ast_dump.setProgram(py)
@@ -323,12 +334,12 @@ class MainWindow(QMainWindow):
                 self._last_dot += out
 
         def on_ast_finished(_code, _status):
-            on_ast_ready()  # drenar
+            on_ast_ready()  # drenar buffer
             dot_txt = (self._last_dot or "").strip()
             if not dot_txt or "digraph" not in dot_txt:
                 self.astLabel.setText("No se pudo generar DOT del AST.\n¿Está correcto el archivo?\n\nSalida:\n" + (self._last_dot or "(vacía)"))
                 return
-            # 2) Render con Graphviz (dot -Tpng)
+            # (2) Render con Graphviz (dot)
             self.render_dot_to_png(dot_txt, workdir)
 
         self._proc_ast_dump.readyReadStandardOutput.connect(on_ast_ready)
@@ -340,9 +351,10 @@ class MainWindow(QMainWindow):
         self._proc_ast_dump.start()
 
     def render_dot_to_png(self, dot_text: str, workdir: str):
+        # Ejecuta 'dot' y recibe PNG por stdout
         self._proc_dot = QProcess(self)
         self._proc_dot.setWorkingDirectory(workdir)
-        self._proc_dot.setProgram("dot")           # requiere Graphviz instalado
+        self._proc_dot.setProgram("dot")
         self._proc_dot.setArguments(["-Tpng"])
         self._proc_dot.setProcessChannelMode(QProcess.MergedChannels)
 
@@ -354,13 +366,11 @@ class MainWindow(QMainWindow):
                 png_chunks.append(data)
             err = bytes(self._proc_dot.readAllStandardError())
             if err:
-                # también agregamos a output IDE
                 self.append_output(err.decode("utf-8", errors="replace"))
 
         def on_dot_finished(_code, _status):
             on_dot_out()
             if not png_chunks:
-                # Fallback: mostrar DOT como texto y sugerir instalar Graphviz
                 msg = (
                     "No se pudo renderizar con Graphviz (dot).\n"
                     "Instala Graphviz y asegúrate que 'dot' esté en PATH.\n\n"
@@ -381,7 +391,7 @@ class MainWindow(QMainWindow):
         self._proc_dot.readyReadStandardError.connect(on_dot_out)
         self._proc_dot.finished.connect(on_dot_finished)
 
-        # Enviar DOT por stdin
+        # Enviar DOT a 'dot' por stdin
         self._proc_dot.start()
         if not self._proc_dot.waitForStarted(5000):
             self.astLabel.setText("No se pudo iniciar 'dot'. ¿Está Graphviz instalado?")
@@ -389,7 +399,6 @@ class MainWindow(QMainWindow):
         self._proc_dot.write(dot_text.encode("utf-8"))
         self._proc_dot.closeWriteChannel()
 
-    # ---- Outline ----
     def populate_outline(self, symbols: dict):
         self.outline.clear()
         root = self.outline.invisibleRootItem()
@@ -433,6 +442,7 @@ class MainWindow(QMainWindow):
 
         self.outline.expandAll()
 
+    # Saltar desde outline al texto
     def on_outline_jump(self, item: QTreeWidgetItem, _col: int):
         name = item.data(0, Qt.UserRole)
         ed = self._current_editor()
@@ -446,6 +456,7 @@ class MainWindow(QMainWindow):
             ed.setTextCursor(cur)
             ed.setFocus()
 
+    # Saltar desde Problems a la posición exacta
     def on_problem_jump(self, item: QTreeWidgetItem, _col: int):
         ed = self._current_editor()
         if not ed:
@@ -463,6 +474,7 @@ class MainWindow(QMainWindow):
         ed.setTextCursor(cur)
         ed.setFocus()
 
+    # Cerrar pestañas guardando si hay cambios
     def on_close_tab(self, index: int):
         w = self.tabs.widget(index)
         try:
@@ -475,7 +487,6 @@ class MainWindow(QMainWindow):
             pass
         self.tabs.removeTab(index)
 
-    # ---- Theme ----
     def on_toggle_theme(self):
         self.theme = "light" if (self.theme or "dark") == "dark" else "dark"
         apply_theme(QApplication.instance(), self.theme)

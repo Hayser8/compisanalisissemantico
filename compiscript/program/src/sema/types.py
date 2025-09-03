@@ -1,19 +1,10 @@
-# program/src/sema/types.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-
-# -----------------------------
-# Excepciones
-# -----------------------------
 class SemanticTypeError(TypeError):
     pass
 
-
-# -----------------------------
-# Tipos base
-# -----------------------------
 @dataclass(frozen=True)
 class Type:
     name: str
@@ -38,7 +29,6 @@ class VoidType(Type):
 
 @dataclass(frozen=True)
 class NullType(Type):
-    # null es subtipo de tipos por-referencia (clase, arreglo, string)
     def is_subtype_of(self, other: "Type") -> bool:
         return isinstance(other, (ClassType, ArrayType, PrimitiveType)) and other in (STRING,) or isinstance(other, (ClassType, ArrayType))
 
@@ -46,7 +36,7 @@ class NullType(Type):
 @dataclass(frozen=True)
 class ArrayType(Type):
     elem: Type
-    rank: int = 1  # T[], T[][], ...
+    rank: int = 1  
 
     def __post_init__(self):
         if self.rank < 1:
@@ -56,13 +46,11 @@ class ArrayType(Type):
         return f"{self.elem}{'[]' * self.rank}"
 
     def is_subtype_of(self, other: "Type") -> bool:
-        # Arreglos invariantes por simplicidad
         return isinstance(other, ArrayType) and self.elem == other.elem and self.rank == other.rank
 
 
 @dataclass(frozen=True)
 class ClassType(Type):
-    # Sólo el nombre identifica la clase (no modelamos jerarquía aquí)
     pass
 
 
@@ -76,14 +64,13 @@ class FunctionType(Type):
         return f"({ps}) -> {self.ret}"
 
     def is_subtype_of(self, other: "Type") -> bool:
-        # Invariancia simple de funciones para este proyecto (sin co/contra-varianza)
         return isinstance(other, FunctionType) and self.params == other.params and self.ret == other.ret
 
 
 # Singletons de primitivos
 BOOLEAN = PrimitiveType("boolean")
 INTEGER = PrimitiveType("integer")
-FLOAT   = PrimitiveType("float")   # si aún no está en gramática, igual lo soportamos semánticamente
+FLOAT   = PrimitiveType("float")  
 STRING  = PrimitiveType("string")
 VOID    = VoidType("void")
 NULL    = NullType("null")
@@ -108,28 +95,16 @@ def is_reference_like(t: Type) -> bool:
     return isinstance(t, (ArrayType, ClassType)) or is_string(t)
 
 
-# -----------------------------
-# Reglas de asignación
-# -----------------------------
 def is_assignable(src: Type, dst: Type) -> bool:
-    # igualdad exacta
     if src == dst:
         return True
-    # promoción numérica: integer -> float
     if src == INTEGER and dst == FLOAT:
         return True
-    # null -> reference-like (clase, arreglo, string)
     if src == NULL and is_reference_like(dst):
         return True
-    # por defecto, no asignable
     return False
 
-
-# -----------------------------
-# Operadores binarios y unarios
-# -----------------------------
 def result_add(a: Type, b: Type) -> Type:
-    # Soportamos concatenación string + string (como en ejemplos)
     if is_string(a) and is_string(b):
         return STRING
     # Numérico
@@ -145,7 +120,6 @@ def result_div(a: Type, b: Type) -> Type:
     return unify_numeric(a, b)
 
 def result_mod(a: Type, b: Type) -> Type:
-    # Aceptamos % sobre numéricos (estilo TypeScript: numbers)
     return unify_numeric(a, b)
 
 def result_logical_and(a: Type, b: Type) -> Type:
@@ -178,10 +152,6 @@ def result_equality(a: Type, b: Type) -> Type:
         return BOOLEAN
     raise SemanticTypeError(f"Igualdad requiere tipos compatibles, recibidos: {a}, {b}")
 
-
-# -----------------------------
-# Arreglos
-# -----------------------------
 def array_of(elem: Type, rank: int = 1) -> ArrayType:
     return ArrayType(name="array", elem=elem, rank=rank)
 
@@ -190,15 +160,11 @@ def index_result(t_arr: Type, t_index: Type) -> Type:
         raise SemanticTypeError(f"Indexación requiere arreglo, recibido: {t_arr}")
     if t_index != INTEGER:
         raise SemanticTypeError(f"Índice debe ser integer, recibido: {t_index}")
-    # Si queda una sola dimensión, retorna el elemento; si no, reduce el rank
     if t_arr.rank == 1:
         return t_arr.elem
     return ArrayType(name="array", elem=t_arr.elem, rank=t_arr.rank - 1)
 
 
-# -----------------------------
-# Funciones
-# -----------------------------
 def function_type(params: List[Type], ret: Type) -> FunctionType:
     return FunctionType(name="fn", params=tuple(params), ret=ret)
 

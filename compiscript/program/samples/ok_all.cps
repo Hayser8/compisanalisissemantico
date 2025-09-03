@@ -1,23 +1,20 @@
-// ok_all.cps — versión robusta y libre de errores con tu checker
-
 // ----- Constantes y variables top-level -----
 const PI: float = 3.1415926;
 
 let a: integer = 3;
-let b: float = a;              // promoción int -> float
+let b: float = a;              
 let s: string = "hola";
-let t: string = s + " mundo";  // concatenación de strings
+let t: string = s + " mundo"; 
 
 let xs: integer[] = [1, 2, 3, 4];
 let ys: float[]   = [1.0, 2.0, 3.5];
 
-// 2D array: sin anotación explícita para evitar igualdad estructural estricta
 let grid = [[1,2],[3,4]];
 let g11: integer = grid[1][1]; // 4
 
 // mezcla numérica con inferencia (float[])
 function makeMix(): float[] {
-  let mix = [1, 2.0, 3]; // inferido como float[]
+  let mix = [1, 2.0, 3];
   return mix;
 }
 
@@ -27,16 +24,14 @@ function pokeArray() {
   ys[1] = ys[1] + 0.5;
 }
 
-// ----- Operadores aritméticos / lógicos / relacionales -----
-let sumNum: float = 1.0 + a;         // float
-let prod: float = (a * 2) / 3.0;     // numérico
+let sumNum: float = 1.0 + a;         
+let prod: float = (a * 2) / 3.0;     
 let rest: integer = 10 - 7;
-let modOk: float = 5.0 % 2;          // permitido por las reglas
+let modOk: float = 5.0 % 2;          
 
 let flag: boolean = (a < 10) && (s == "hola") || !(false);
 let tern: integer = (a > 0) ? a : 0; // condicional
 
-// ----- Funciones: params, retorno, recursión -----
 function sum2(x: integer, y: integer): integer { 
   return x + y; 
 }
@@ -51,17 +46,14 @@ function fib(n: integer): integer {
   return fib(n - 1) + fib(n - 2);
 }
 
-// ---- Funciones anidadas y captura (closures) ----
 function outer(a0: integer): integer {
   let bias: integer = 10;
   function inner(b: integer): integer {
-    // captura a0 y bias
     return a0 + bias + b;
   }
   return inner(5);
 }
 
-// ----- Bucles: while, do-while, foreach (sin arr.length, sin 'for' con asignación en update) -----
 function sumWithLoops(): integer {
   let acc: integer = 0;
 
@@ -110,7 +102,6 @@ function checkSwitch(v: integer): integer {
       return 0;
     }
   }
-  // Fallback por si tu checker no marca switch como return-guaranteed:
   return 0;
 }
 
@@ -124,11 +115,11 @@ class Animal {
 class Dog : Animal {
   const SPECIES: string = "Canis";
   function constructor(n: string) { this.name = n; }
-  function bark(): string { return this.speak() + " guau"; } // usa método heredado
+  function bark(): string { return this.speak() + " guau"; } 
 }
 
 class A {
-  const K: integer = 7;      // campo const inmutable
+  const K: integer = 7;      
   let v: integer;
   function constructor(v: integer) { this.v = v; }
   function get(): integer { return this.v + this.K - 7; }
@@ -140,7 +131,6 @@ let d2: Dog = new Dog("Rex");
 let pack: Dog[] = [d1, d2];
 let firstVoice: string = pack[0].bark();
 
-// ----- Funciones con arreglos (sin .length) -----
 function sumFirstN(arr: integer[], n: integer): integer {
   let s: integer = 0;
   let i: integer = 0;
@@ -151,7 +141,6 @@ function sumFirstN(arr: integer[], n: integer): integer {
   return s;
 }
 
-// ----- “main” informal para ejecutar varias cosas sin errores -----
 function runAll(): integer {
   pokeArray();
 

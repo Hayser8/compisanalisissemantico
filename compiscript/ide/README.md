@@ -5,7 +5,7 @@ Permite **abrir/probar** archivos `.cps`, ver **errores** y **símbolos** del an
 
 ---
 
-## ✨ Características
+## Características
 
 - **Explorador de archivos**: abre carpetas y navega `.cps`.
 - **Editor** con resaltado (syntax highlighting).
@@ -16,12 +16,12 @@ Permite **abrir/probar** archivos `.cps`, ver **errores** y **símbolos** del an
   - **Output**: logs + **JSON** crudo del CLI.
   - **Reporte**: resumen **legible** (OK/errores y símbolos).
 - **Outline**: variables, funciones y clases detectadas.
-- **🌓 Theme**: claro (blanco/negro) y oscuro.
+- **Theme**: claro (blanco/negro) y oscuro.
 
 > El IDE actual por la fase **no ejecuta programas**; invoca el **análisis** del proyecto vía `cli.py --json --symbols`.
 
 
-## ✅ Requisitos
+## Requisitos
 
 - **Python 3.10+** (recomendado 3.10 o 3.11)
 - **pip** actualizado
@@ -35,7 +35,7 @@ Permite **abrir/probar** archivos `.cps`, ver **errores** y **símbolos** del an
 
 ---
 
-## 🚀 Instalación
+## Instalación
 
 ### Opción A — venv del IDE (rápida)
 
@@ -63,10 +63,7 @@ pip install "PySide6==6.7.2" "antlr4-python3-runtime==4.13.1"
 
 ```bash
 cd compiscript/program
-python3 -m venv .venv      # (o: py -3.10 -m venv .venv en Windows)
-# Activar:
-# - Windows: .\.venv\Scripts\activate
-# - macOS/Linux: source .venv/bin/activate
+python3 -m venv .venv 
 pip install --upgrade pip
 pip install "antlr4-python3-runtime==4.13.1"
 ```
@@ -76,12 +73,13 @@ pip install "antlr4-python3-runtime==4.13.1"
 
 ---
 
-## ▶️ Ejecutar el IDE
+## Ejecutar el IDE
 
 Con el venv activado:
 
 ```bash
 cd compiscript/ide
+.\.venv\Scripts\activate
 python main.py
 ```
 
@@ -95,17 +93,17 @@ python main.py
    - **Output**: logs + JSON crudo del CLI.
    - **Reporte**: resumen legible (OK/errores y símbolos).
    - **Outline**: símbolos navegables.
-5. **🌓 Theme** alterna claro/oscuro.
+5. **Theme** alterna claro/oscuro.
 
 ---
 
-## 🧪 Samples
+## Samples
 
 - `program/samples/ok_all.cps` → **OK** sin errores.
 - `program/samples/bad_types.cps` → errores de tipos esperados.
 
 
-## 🔧 Cómo decide el Python el `runner.py`
+## Cómo decide el Python el `runner.py`
 
 Orden de preferencia:
 1. `compiscript/program/.venv` (si existe)
@@ -118,7 +116,7 @@ Si el análisis **no produce JSON** y parece error real (p. ej., `No module name
 
 ---
 
-## 📜 Notas
+## Notas
 
 - El IDE consume el JSON de `cli.py --json --symbols`.
 - Si se cambia el formato del CLI, ajusta `on_run_finished()` y `update_pretty_report()` en `app.py`.

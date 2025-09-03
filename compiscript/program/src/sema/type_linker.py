@@ -1,4 +1,3 @@
-# program/src/sema/type_linker.py
 from __future__ import annotations
 from typing import Optional
 
@@ -7,7 +6,7 @@ from .symbols import (
     VariableSymbol, ConstSymbol, ParamSymbol, FieldSymbol, FunctionSymbol, ClassSymbol
 )
 from .scopes import Scope
-from . import symbols as symmod  # para acceder a tipos resueltos en los símbolos (atributos)
+from . import symbols as symmod 
 from .types import (
     BOOLEAN, INTEGER, FLOAT, STRING, VOID,
     ClassType, ArrayType, array_of, Type
@@ -16,18 +15,12 @@ from .decl_collector import DeclarationCollector
 
 
 class TypeLinker:
-    """
-    Pasada 2: Resolver anotaciones de tipo → objetos Type.
-    - Variables, consts, campos, parámetros, returns de funciones/métodos
-    - Clases base (Dog : Animal) → valida existencia y resuelve a ClassType
-    - Reporta E_UNKNOWN_TYPE cuando el identificador de tipo no existe como clase
-    """
+
     def __init__(self, reporter: ErrorReporter, decl: DeclarationCollector) -> None:
         self.reporter = reporter
         self.decl = decl
         self.global_scope: Scope = decl.global_scope
 
-    # ------------------ API principal ------------------
     def link(self) -> None:
         # Top-level
         for _, sym in self.global_scope.items():
@@ -54,19 +47,15 @@ class TypeLinker:
                 elif isinstance(ms, FunctionSymbol):
                     ms.resolved_return = self._resolve_return(ms.return_ann)
 
-        # === NUEVO: parámetros y returns de TODAS las funciones en todos los FunctionScope ===
         for key, fnscope in self.decl.function_scopes.items():
-            # a) Resolver tipos de parámetros del scope
             for _, sym in fnscope.items():
                 if isinstance(sym, ParamSymbol) and sym.type_ann:
                     sym.resolved_type = self._parse_type_str(sym.type_ann)
 
-            # b) Asegurar el return de la función dueña del scope (anidadas, métodos, top-level)
             parent = fnscope.parent
             if parent:
                 fsym = parent.resolve_local(fnscope.name)
                 if isinstance(fsym, FunctionSymbol):
-                    # si ya fue resuelto antes no pasa nada por re-asignar el mismo valor
                     fsym.resolved_return = self._resolve_return(fsym.return_ann)
             for _, ps in fnscope.items():
                 if isinstance(ps, ParamSymbol) and ps.type_ann:
@@ -80,10 +69,6 @@ class TypeLinker:
         return self._parse_type_str(ann)
 
     def _parse_type_str(self, s: str) -> Type:
-        """
-        Convierte 'integer', 'string[]', 'Animal[][]' en objetos Type.
-        Valida que identificadores de clase existan como ClassSymbol.
-        """
         base = s
         rank = 0
         # contar sufijos []

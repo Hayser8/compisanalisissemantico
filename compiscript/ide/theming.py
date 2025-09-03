@@ -18,7 +18,7 @@ def _light_palette() -> QPalette:
     p.setColor(QPalette.ToolTipText, QColor("#000000"))
 
     # Selección
-    p.setColor(QPalette.Highlight, QColor("#2979FF"))           # azul accesible
+    p.setColor(QPalette.Highlight, QColor("#2979FF"))          
     p.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
 
     # Links
@@ -90,7 +90,7 @@ def apply_theme(app: QApplication, theme: str = "dark") -> None:
     if not isinstance(app, QApplication):
         return
 
-    app.setStyle("Fusion")  # base consistente cross-platform
+    app.setStyle("Fusion")  
 
     if (theme or "").lower() == "light":
         app.setPalette(_light_palette())

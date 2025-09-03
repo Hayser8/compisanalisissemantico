@@ -6,7 +6,7 @@ from typing import Optional, Dict
 # ---- Zero-config path discovery ----
 def _candidates_for_cli(base_dir: str) -> list[str]:
     here = os.path.abspath(base_dir)
-    repo = os.path.abspath(os.path.join(here, os.pardir))  # repo root (.. from ide folder)
+    repo = os.path.abspath(os.path.join(here, os.pardir))  
     cands = [
         os.path.join(repo, 'cli.py'),
         os.path.join(repo, 'program', 'cli.py'),
@@ -55,17 +55,16 @@ def find_defaults() -> Dict[str, str]:
 def _docker_available() -> bool:
     return shutil.which('docker') is not None
 
-# ---- Runner ----
 class CliRunner(QObject):
-    output = Signal(str)     # incremental stdout/stderr
-    finished = Signal(dict)  # parsed JSON or error payload
+    output = Signal(str)     
+    finished = Signal(dict)  
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.proc: Optional[QProcess] = None
         self.defaults = find_defaults()
         self._buf: str = ''
-        self._mode: str = 'python'  # or 'docker'
+        self._mode: str = 'python'  
         self._file_path: str = ''
 
     def run_file(self, file_path: str) -> None:
@@ -80,7 +79,6 @@ class CliRunner(QObject):
         self._file_path = os.path.abspath(file_path)
 
         if not (self.defaults.get('cli_path') and os.path.isfile(self.defaults['cli_path'])):
-            # no cli.py found -> try docker directly
             if _docker_available():
                 self._mode = 'docker'
                 self._run_docker(self._file_path)
@@ -91,7 +89,6 @@ class CliRunner(QObject):
 
         self._run_python(self._file_path)
 
-    # --- internal helpers ---
     def _wire_process(self):
         self.proc.setProcessChannelMode(QProcess.MergedChannels)
         self.proc.started.connect(lambda: self.output.emit(f'[IDE] {self._mode} process started\n'))
@@ -125,7 +122,6 @@ class CliRunner(QObject):
             self.finished.emit({'ok': False, 'errors': [{'message': 'program_dir inválido'}]})
             return
 
-        # map file to /program/<rel>
         try:
             rel = os.path.relpath(file_path, host_dir)
         except Exception:
@@ -150,7 +146,6 @@ class CliRunner(QObject):
         self._wire_process()
         self.proc.start()
 
-    # --- signals ---
     def _on_ready(self):
         if not self.proc: return
         out = bytes(self.proc.readAllStandardOutput()).decode('utf-8', errors='replace')
@@ -167,7 +162,6 @@ class CliRunner(QObject):
         if raw and not raw.endswith('\n'):
             self.output.emit('\n')
 
-        # 1) Intentar parsear JSON SIEMPRE primero
         parsed = None
         try:
             start = raw.find('{')
@@ -176,7 +170,7 @@ class CliRunner(QObject):
         except Exception:
             parsed = None
 
-        # 2) Si hay JSON, lo tomamos como resultado final (aunque exit!=0)
+
         if parsed is not None:
             self.finished.emit(parsed)
             self.proc = None
@@ -185,7 +179,7 @@ class CliRunner(QObject):
             self._file_path = ''
             return
 
-        # 3) No hubo JSON -> evaluar fallback a Docker sólo si parece error real
+
         looks_bad = (code != 0) or ('Traceback' in raw) or ('No module named antlr4' in raw)
         if self._mode == 'python' and looks_bad and _docker_available():
             self.output.emit(f'[IDE] python falló (exit={code}); intentando Docker…\n')
@@ -194,7 +188,7 @@ class CliRunner(QObject):
             self._run_docker(self._file_path)
             return
 
-        # 4) Sin JSON y sin fallback posible: devolver payload de error
+
         data = {'ok': False, 'errors': [{'message': f'No JSON en salida (exit={code})'}], 'raw': raw}
         self.finished.emit(data)
         self.proc = None
