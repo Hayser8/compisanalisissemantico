@@ -23,7 +23,10 @@ class Scope:
             return False
         self._symbols[sym.name] = sym
         return True
-
+    
+    # alias para legibilidad
+    def lookup_current(self, name: str) -> Optional[Symbol]:
+        return self.resolve_local(name)
     # Búsqueda local
     def resolve_local(self, name: str) -> Optional[Symbol]:
         return self._symbols.get(name)

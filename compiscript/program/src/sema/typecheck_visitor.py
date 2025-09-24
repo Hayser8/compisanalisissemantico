@@ -9,7 +9,7 @@ from CompiscriptVisitor import CompiscriptVisitor
 from .errors import (
     ErrorReporter,
     E_UNDECLARED, E_ASSIGN_INCOMPAT, E_OP_TYPES, E_CALL_ARITY, E_INDEX_INVALID,
-    E_MEMBER_NOT_FOUND, E_THIS_CONTEXT, E_BAD_BREAK_CONTINUE, E_COND_NOT_BOOL,
+    E_MEMBER_NOT_FOUND, E_DUPLICATE_ID, E_THIS_CONTEXT, E_BAD_BREAK_CONTINUE, E_COND_NOT_BOOL,
     E_RETURN_OUTSIDE, E_MISSING_RETURN, E_ASSIGN_TO_CONST, E_DEAD_CODE,
 )
 from .scopes import Scope, ScopeStack, ClassScope, FunctionScope
@@ -45,13 +45,16 @@ class TypeCheckVisitor(CompiscriptVisitor):
     def scope(self) -> Scope:
         return self.scopes.current
 
-    def _declare_local_if_needed(self, name: str, sym: Symbol) -> None:
-        """Declara en el scope actual si no existe localmente (para variables dentro de bloques).
-        En global/clase, ya existen por la pasada de declaraciones."""
-        # Si estamos en global/clase, no redeclarar
+    def _declare_local_or_error(self, ctx: ParserRuleContext, sym: Symbol) -> None:
+        """
+        Declara en el scope actual (sólo si NO es global/clase).
+        Si el identificador ya existe en el scope ACTUAL, reporta E_DUPLICATE_ID.
+        """
         if self.scope.kind in ("global", "class"):
+            # Top-level y miembros de clase ya se declararon en DeclarationCollector
             return
-        self.scope.declare(sym)
+        if not self.scope.declare(sym):
+            self.rep.error(E_DUPLICATE_ID, f"Identificador redeclarado: {sym.name}", ctx)
 
     def _resolve_var(self, ctx: ParserRuleContext, name: str) -> Optional[Symbol]:
         sym = self.scope.resolve(name)
@@ -133,6 +136,21 @@ class TypeCheckVisitor(CompiscriptVisitor):
             return f"{cls}::" + "::".join(parts)
         return "::" + "::".join(parts)
 
+    def _visit_block_in_current_scope(self, ctx: CompiscriptParser.BlockContext):
+        """
+        Igual a visitBlock, pero NO crea un BlockScope nuevo.
+        Úsalo para el bloque superior del cuerpo de función.
+        """
+        must_return = False
+        for st in ctx.statement():
+            if must_return:
+                self.rep.error(E_DEAD_CODE, "Código inalcanzable después de return/break/continue", st)
+                continue
+            r = self.visit(st)
+            if r is True:
+                must_return = True
+        return must_return
+
     # ===== Entrypoint =====
 
     def visitProgram(self, ctx: CompiscriptParser.ProgramContext):
@@ -145,7 +163,7 @@ class TypeCheckVisitor(CompiscriptVisitor):
 
     def visitBlock(self, ctx: CompiscriptParser.BlockContext):
         # Crear un block scope
-        blk = self.scopes.enter_block()
+        self.scopes.enter_block()
         must_return = False
         for st in ctx.statement():
             if must_return:
@@ -212,7 +230,7 @@ class TypeCheckVisitor(CompiscriptVisitor):
             self.rep.error(E_OP_TYPES, f"foreach requiere arreglo, recibido {arr_t}", ctx.expression())
         # Declarar iterador como var local (sin tipo explícito)
         it_name = ctx.Identifier().getText()
-        self._declare_local_if_needed(it_name, VariableSymbol(name=it_name))
+        self._declare_local_or_error(ctx, VariableSymbol(name=it_name))
         self.loop_depth += 1
         self.visit(ctx.block())
         self.loop_depth -= 1
@@ -246,11 +264,10 @@ class TypeCheckVisitor(CompiscriptVisitor):
         return True
 
     def visitSwitchStatement(self, ctx: CompiscriptParser.SwitchStatementContext):
-        # Ahora exigimos que la condición del switch sea boolean
+        # (Lo cambiaremos a strings en el siguiente feature)
         cond_t = self.visit(ctx.expression())
         if cond_t is not None:
             self._require_boolean(cond_t, ctx.expression())
-        # Recorremos los bloques de los cases y default (no garantizamos return)
         for case in ctx.switchCase():
             for st in case.statement():
                 self.visit(st)
@@ -263,28 +280,26 @@ class TypeCheckVisitor(CompiscriptVisitor):
 
     def visitVariableDeclaration(self, ctx: CompiscriptParser.VariableDeclarationContext):
         name = ctx.Identifier().getText()
+
+        # Tipo anotado (si existe)
         tann = None
         if ctx.typeAnnotation():
-            # CompiscriptParser.TypeAnnotationContext puede tener type_/type
             ta = ctx.typeAnnotation()
             tctx = getattr(ta, "type_", None)() if hasattr(ta, "type_") else (ta.type() if hasattr(ta, "type") else None)
             tann = tctx.getText() if tctx is not None else None
 
-        # Evitar redeclarar en global/clase (ya existe)
-        sym = self.scope.resolve_local(name) if hasattr(self.scope, "resolve_local") else None
         if self.scope.kind in ("global", "class"):
-            # ya declarado por DeclarationCollector; úsalo
+            # Top-level o campo de clase: ya fue declarado por DeclarationCollector
             sym = self.scope.resolve(name)
         else:
-            # declara local
+            # Local: declara aquí y reporta E_DUPLICATE_ID si choca en el MISMO scope
             vs = VariableSymbol(name=name, type_ann=tann)
-            self._declare_local_if_needed(name, vs)
+            self._declare_local_or_error(ctx, vs)
             sym = self.scope.resolve(name)
 
         # Inicializador (opcional)
         if ctx.initializer():
             val_t = self.visit(ctx.initializer().expression())
-            # si hay anotación, validar asignabilidad
             if isinstance(sym, VariableSymbol):
                 if tann:
                     dst = self._tl._parse_type_str(tann)
@@ -292,26 +307,32 @@ class TypeCheckVisitor(CompiscriptVisitor):
                     if val_t is not None and not is_assignable(val_t, dst):
                         self.rep.error(E_ASSIGN_INCOMPAT, f"No se puede asignar {val_t} a {dst}", ctx.initializer().expression())
                 else:
-                    # inferencia mínima: si no hay anotación y hay init, usa tipo del init
+                    # inferencia mínima
                     sym.resolved_type = val_t
         return False
 
     def visitConstantDeclaration(self, ctx: CompiscriptParser.ConstantDeclarationContext):
         name = ctx.Identifier().getText()
-        # Encontrar símbolo (global o clase ya declarado; local podríamos crear)
+
+        # Buscar símbolo si ya existía (global/clase)
         sym = self.scope.resolve(name)
+
         if not isinstance(sym, ConstSymbol):
-            # Const local en bloque (no top-level): créalo si no estaba
+            # Const local: crear y validar duplicado en MISMO scope
             cs = ConstSymbol(name=name)
-            self._declare_local_if_needed(name, cs)
+            self._declare_local_or_error(ctx, cs)
             sym = self.scope.resolve(name)
-        # verificar init
-        val_t = self.visit(ctx.expression())
+
+        # Tipo anotado en const (opcional)
         tann = None
         if ctx.typeAnnotation():
             ta = ctx.typeAnnotation()
             tctx = getattr(ta, "type_", None)() if hasattr(ta, "type_") else (ta.type() if hasattr(ta, "type") else None)
             tann = tctx.getText() if tctx is not None else None
+
+        # Evaluar inicializador
+        val_t = self.visit(ctx.expression())
+
         if isinstance(sym, ConstSymbol):
             if tann:
                 dst = self._tl._parse_type_str(tann)
@@ -347,10 +368,10 @@ class TypeCheckVisitor(CompiscriptVisitor):
         if is_method and prev_class is None and isinstance(self.scope, ClassScope):
             self.current_class = self.decl.global_scope.resolve(self.scope.name)  # ClassSymbol
 
-        # Empuja scope de función
+        # Empuja scope de función (que ya contiene params)
         self.scopes.push(fn_scope)
-        # Visitar cuerpo
-        must_return = self.visit(ctx.block())
+        # ⬇️ IMPORTANTE: procesar el cuerpo SIN crear BlockScope adicional
+        must_return = self._visit_block_in_current_scope(ctx.block())
         self.scopes.pop()
 
         # Validar return obligatorio
@@ -403,14 +424,11 @@ class TypeCheckVisitor(CompiscriptVisitor):
             return False
 
         # --- Asignación a propiedad: obj.prop = expr;
-        # En esta alternativa hay dos expressions(): la del objeto (antes del '.')
-        # y la del valor (después del '=').
         obj_t = self.visit(ctx.expression(0))
         if not isinstance(obj_t, ClassType):
             self.rep.error(E_MEMBER_NOT_FOUND, f"No es objeto para asignación de propiedad: {obj_t}", ctx.expression(0))
             return False
 
-        # OJO: aquí hay un único Identifier en la regla; no usar índice.
         prop = ctx.Identifier().getText()
         mem = self._member_lookup(obj_t, prop)
         if not isinstance(mem, FieldSymbol):
@@ -430,8 +448,6 @@ class TypeCheckVisitor(CompiscriptVisitor):
     # ---------- Expresiones (núcleo) ----------
 
     def visitTernaryExpr(self, ctx: CompiscriptParser.ConditionalExprContext):
-        # Nota: el contexto real de la alternativa es CompiscriptParser.TernaryExprContext,
-        # pero el método generado acepta el tipo base; obtenemos children.
         if ctx.getChildCount() == 1:
             return self.visit(ctx.logicalOrExpr())
         cond_t = self.visit(ctx.logicalOrExpr())
@@ -439,16 +455,13 @@ class TypeCheckVisitor(CompiscriptVisitor):
             self._require_boolean(cond_t, ctx.logicalOrExpr())
         t1 = self.visit(ctx.expression(0))
         t2 = self.visit(ctx.expression(1))
-        # Regla simple: iguales ⇒ ese tipo; numéricos ⇒ numérico unificado; si no, error y devolvemos t1 para continuar
         if t1 == t2:
             return t1
         if t1 and t2 and is_numeric(t1) and is_numeric(t2):
-            # usa suma/div para decidir: aquí elegimos la promoción estándar
             return FLOAT if FLOAT in (t1, t2) else INTEGER
         self.rep.error(E_OP_TYPES, f"Ramas ? : incompatibles: {t1} y {t2}", ctx)
         return t1 or t2
 
-    # Cadenas binarias de operadores: leemos hijos alternando expr y operador
     def _eval_chain(self, ctx: ParserRuleContext, first_child, op_set: set, op_apply):
         children = list(ctx.getChildren())
         if not children:
@@ -463,7 +476,6 @@ class TypeCheckVisitor(CompiscriptVisitor):
                 try:
                     cur = op_apply(op, cur, rhs, children[i+1])
                 except Exception:
-                    # registra error genérico si algo sale mal
                     self.rep.error(E_OP_TYPES, f"Tipos inválidos para operador {op}", children[i+1])
                 i += 2
             else:
@@ -523,23 +535,18 @@ class TypeCheckVisitor(CompiscriptVisitor):
             return BOOLEAN
         if ctx.Literal():
             text = ctx.Literal().getText()
-            # String si está entre comillas
             if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
                 return STRING
-            # Float si contiene punto o exponente (según gramática: FloatLiteral va primero)
             if any(ch in text for ch in ('.', 'e', 'E')):
                 return FLOAT
-            # Si no, es entero
             return INTEGER
         if ctx.arrayLiteral():
             return self._eval_array_literal(ctx.arrayLiteral())
         return None
 
     def _eval_array_literal(self, ctx: CompiscriptParser.ArrayLiteralContext):
-        # '[' (expression (',' expression)*)? ']'
         elems = ctx.expression()
         if not elems:
-            # Array vacío: dejamos tipo indeterminado (string[] por defecto no es correcto); reporta aviso
             self.rep.error(E_OP_TYPES, "Literal de arreglo vacío sin tipo explícito", ctx)
             return array_of(VOID)
         t0: Optional[Type] = None
@@ -548,7 +555,6 @@ class TypeCheckVisitor(CompiscriptVisitor):
             if t0 is None:
                 t0 = te
             else:
-                # unificación simple: si ambos numéricos, promociona; si no, exige igualdad exacta
                 if te != t0:
                     if te and t0 and is_numeric(te) and is_numeric(t0):
                         t0 = FLOAT if FLOAT in (te, t0) else INTEGER
