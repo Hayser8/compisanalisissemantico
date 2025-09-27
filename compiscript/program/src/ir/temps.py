@@ -1,76 +1,82 @@
+# program/src/ir/temps.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Set, Optional
+from typing import Optional, List
 
 from .model import Temp, Label
 
 
+@dataclass
 class TempAllocator:
     """
-    Asignador de temporales con reciclaje simple (free-list).
+    Asignador de temporales con reciclaje (free-list).
 
-    - new_temp(type_hint) -> Temp   : Entrega un Temp disponible.
-      * Si hay nombres liberados, los reutiliza (LIFO).
-      * Si no hay, crea un nombre nuevo t<N>.
-    - release(Temp)                 : Marca el nombre del Temp como reutilizable.
+    - new_temp(type_hint) -> Temp
+        * Reutiliza IDs liberados (LIFO) si existen.
+        * Si no hay, crea un nombre nuevo t<N>.
+    - free(Temp) -> None
+        * Marca el temporal como disponible para reutilización.
+    - release(Temp) -> None
+        * Alias de free(...) por compatibilidad.
 
-    Notas:
-    - El type_hint se adjunta al Temp retornado, pero el reciclaje no
-      intenta compatibilizar por tipo (lo mantiene simple, el generador
-      decide cuándo liberar).
-    - Evita 'double-free' del mismo nombre con un set de control.
+    Nota: no hacemos tracking de tipos en el reciclaje (simple).
     """
+    _next_id: int = 0
+    _free: List[int] = None  # inicializado en __post_init__
 
-    def __init__(self, prefix: str = "t") -> None:
-        self.prefix = prefix
-        self._next_id: int = 0
-        self._free: List[str] = []
-        self._free_set: Set[str] = set()
-
-    def _fresh_name(self) -> str:
-        name = f"{self.prefix}{self._next_id}"
-        self._next_id += 1
-        return name
+    def __post_init__(self) -> None:
+        if self._free is None:
+            self._free = []
 
     def new_temp(self, type_hint: Optional[str] = None) -> Temp:
         if self._free:
-            name = self._free.pop()
-            self._free_set.remove(name)
-            return Temp(name=name, type_hint=type_hint)
-        return Temp(name=self._fresh_name(), type_hint=type_hint)
+            tid = self._free.pop()
+            return Temp(name=f"t{tid}", type_hint=type_hint)
+        tid = self._next_id
+        self._next_id += 1
+        return Temp(name=f"t{tid}", type_hint=type_hint)
 
-    def release(self, temp: Temp) -> None:
-        name = temp.name
-        # Evitar doble liberación del mismo identificador
-        if name not in self._free_set:
-            self._free.append(name)
-            self._free_set.add(name)
+    def free(self, t: Temp) -> None:
+        """
+        Libera el ID del temp para que pueda reutilizarse.
+        Seguridad básica: sólo acepta nombres 't<numero>'.
+        Evita duplicados en la free-list y no reintroduce IDs que no existieron.
+        """
+        n = getattr(t, "name", "")
+        if not isinstance(n, str) or not n.startswith("t"):
+            return
+        try:
+            tid = int(n[1:])
+        except Exception:
+            return
+        # sólo IDs ya emitidos y no repetidos
+        if 0 <= tid < self._next_id and tid not in self._free:
+            self._free.append(tid)
+
+    # Alias por compatibilidad con versiones previas
+    def release(self, t: Temp) -> None:
+        self.free(t)
 
     def reset(self) -> None:
         """Reinicia el allocator (útil en tests)."""
         self._next_id = 0
         self._free.clear()
-        self._free_set.clear()
 
 
+@dataclass
 class LabelAllocator:
     """
     Generador simple de etiquetas: L0, L1, ...
-
-    - new_label(suffix=None) -> Label
-      * Si 'suffix' se provee, genera 'L<N>_<suffix>' para facilitar lectura.
+    new_label('hint') -> L<N>_hint
     """
-
-    def __init__(self, prefix: str = "L") -> None:
-        self.prefix = prefix
-        self._next_id: int = 0
+    _next_id: int = 0
+    prefix: str = "L"
 
     def new_label(self, suffix: Optional[str] = None) -> Label:
-        base = f"{self.prefix}{self._next_id}"
+        i = self._next_id
         self._next_id += 1
-        if suffix:
-            return Label(f"{base}_{suffix}")
-        return Label(base)
+        base = f"{self.prefix}{i}"
+        return Label(f"{base}_{suffix}") if suffix else Label(base)
 
     def reset(self) -> None:
         self._next_id = 0
