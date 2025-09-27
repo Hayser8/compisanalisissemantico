@@ -1,4 +1,3 @@
-# program/src/sema/decl_collector.py
 from __future__ import annotations
 from typing import Dict, List, Optional
 from antlr4 import ParserRuleContext
@@ -67,6 +66,7 @@ class DeclarationCollector(CompiscriptVisitor):
         self.scope_stack.pop()
 
     def declare_or_error(self, sym: Symbol, ctx: ParserRuleContext) -> None:
+        # Prohíbe redeclaración **en el mismo scope** (sí permite shadowing)
         if not self.current_scope.declare(sym):
             self.reporter.error(E_DUPLICATE_ID, f"Identificador redeclarado: {sym.name}", ctx)
 
@@ -79,7 +79,7 @@ class DeclarationCollector(CompiscriptVisitor):
 
     # ---- Declaraciones top-level ----
     def visitVariableDeclaration(self, ctx: CompiscriptParser.VariableDeclarationContext):
-        # ⬇️ Solo declaramos en global o clase (NO locales)
+        # Solo declaramos en global o clase (NO locales)
         if self.current_scope.kind not in ("global", "class"):
             return None
         name = ctx.Identifier().getText()
@@ -88,7 +88,7 @@ class DeclarationCollector(CompiscriptVisitor):
         return None
 
     def visitConstantDeclaration(self, ctx: CompiscriptParser.ConstantDeclarationContext):
-        # ⬇️ Solo declaramos en global o clase (NO locales)
+        # Solo declaramos en global o clase (NO locales)
         if self.current_scope.kind not in ("global", "class"):
             return None
         name = ctx.Identifier().getText()
@@ -105,11 +105,11 @@ class DeclarationCollector(CompiscriptVisitor):
         # Scope de función para parámetros
         fn_scope = FunctionScope(name=name, parent=self.current_scope)
 
-        # ⬇️ KEY ÚNICA según contexto (global / anidada / en método)
+        # KEY única según contexto (global / anidada / en método)
         key = self._qualified_fn_key(name)
         self.function_scopes[key] = fn_scope
 
-        # Parámetros
+        # Parámetros: detectar duplicados **dentro de la misma lista**
         if ctx.parameters():
             seen = set()
             for pctx in ctx.parameters().parameter():
@@ -124,10 +124,10 @@ class DeclarationCollector(CompiscriptVisitor):
                     self.reporter.error(E_DUPLICATE_PARAM, f"Parámetro duplicado: {pname}", pctx)
                 fn_sym.params.append(psym)
 
-        # ⬇️ Entrar al scope de función SOLO para recorrer y encontrar funciones anidadas
+        # Entrar al scope de función para recorrer y encontrar funciones anidadas
         self.push(fn_scope)
         if ctx.block():
-            self.visit(ctx.block())  # esto recorrerá y llamará visitFunctionDeclaration en anidadas
+            self.visit(ctx.block())
         self.pop()
         return None
 
@@ -171,7 +171,7 @@ class DeclarationCollector(CompiscriptVisitor):
                         if not m_scope.declare(psym):
                             self.reporter.error(E_DUPLICATE_PARAM, f"Parámetro duplicado: {pname}", pctx)
                         msym.params.append(psym)
-                # ⬇️ RECORRER CUERPO DEL MÉTODO para detectar funciones anidadas
+                # Recorrer cuerpo del método para detectar funciones anidadas
                 self.push(m_scope)
                 if fdecl.block():
                     self.visit(fdecl.block())
@@ -208,7 +208,6 @@ class DeclarationCollector(CompiscriptVisitor):
 
     # ---- Keys helper ----
     def _fn_key(self, fn: FunctionSymbol) -> str:
-        # Mantenemos compatibilidad para tests antiguos (top-level)
         return f"::{fn.name}"
 
     def _method_key(self, cls: str, m: str) -> str:
