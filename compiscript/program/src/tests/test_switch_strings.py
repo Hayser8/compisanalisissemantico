@@ -2,10 +2,10 @@
 from antlr4 import InputStream, CommonTokenStream
 from CompiscriptLexer import CompiscriptLexer
 from CompiscriptParser import CompiscriptParser
-from program.src.sema.errors import ErrorReporter, E_OP_TYPES, E_DUPLICATE_ID
-from program.src.sema.decl_collector import DeclarationCollector
-from program.src.sema.type_linker import TypeLinker
-from program.src.sema.typecheck_visitor import TypeCheckVisitor
+from src.sema.errors import ErrorReporter, E_OP_TYPES, E_DUPLICATE_ID
+from src.sema.decl_collector import DeclarationCollector
+from src.sema.type_linker import TypeLinker
+from src.sema.typecheck_visitor import TypeCheckVisitor
 
 
 def _analyze(source: str):
