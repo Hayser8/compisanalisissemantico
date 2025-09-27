@@ -264,13 +264,32 @@ class TypeCheckVisitor(CompiscriptVisitor):
         return True
 
     def visitSwitchStatement(self, ctx: CompiscriptParser.SwitchStatementContext):
-        # (Lo cambiaremos a strings en el siguiente feature)
+        # Soporte: switch con strings
         cond_t = self.visit(ctx.expression())
-        if cond_t is not None:
-            self._require_boolean(cond_t, ctx.expression())
+        if cond_t is not None and cond_t != STRING:
+            self.rep.error(E_OP_TYPES, f"switch requiere 'string', recibido {cond_t}", ctx.expression())
+
+        # Validar cada case: etiqueta string y detectar duplicados de literales
+        seen_literals: set[str] = set()
         for case in ctx.switchCase():
+            if case.expression():
+                label_t = self.visit(case.expression())
+                if label_t is not None and label_t != STRING:
+                    self.rep.error(E_OP_TYPES, f"Etiqueta de case debe ser 'string', recibido {label_t}", case.expression())
+
+                # Detectar duplicados solo cuando la etiqueta es literal "..."
+                txt = case.expression().getText()
+                if len(txt) >= 2 and txt[0] == '"' and txt[-1] == '"':
+                    lit = txt[1:-1]
+                    if lit in seen_literals:
+                        self.rep.error(E_DUPLICATE_ID, f'Etiqueta de case duplicada: "{lit}"', case)
+                    else:
+                        seen_literals.add(lit)
+
+            # Visitar statements del case
             for st in case.statement():
                 self.visit(st)
+
         if ctx.defaultCase():
             for st in ctx.defaultCase().statement():
                 self.visit(st)
