@@ -1,9 +1,11 @@
+# program/src/ir/gen_stmt.py
 from __future__ import annotations
 from typing import List, Optional, Tuple, Any
 
 from .context import IRGenContext
 from .model import (
-    Label, LabelInstr, Goto, IfGoto, Return, Assign, BinOp, Const, Name, Temp
+    Label, LabelInstr, Goto, IfGoto, Return, Assign, BinOp, Const, Name, Temp,
+    Store, SetProp  # <-- NUEVO
 )
 from .gen_expr import gen_expr, _as_operand
 
@@ -11,6 +13,9 @@ from .gen_expr import gen_expr, _as_operand
 # Mini-IR de sentencias:
 # ('block', [stmt, ...])
 # ('expr', expr)
+# ('assign', target, expr)      # target: ('name', id) | ('index', arr, idx) | ('prop', obj, 'p')
+# ('vardecl', name, init_or_None)      # opcional: alias a assign si hay init
+# ('constdecl', name, init_or_None)    # opcional: alias a assign si hay init
 # ('return',)                    -> return
 # ('return', expr)               -> return expr
 # ('if', cond, then_block, else_block_or_None)
@@ -43,6 +48,40 @@ def gen_stmt(node: Stmt, ctx: IRGenContext) -> None:
     if tag == 'expr':
         _, expr = node
         _ = gen_expr(expr, ctx)  # el resultado se ignora
+        return
+
+    # --- NUEVO: asignación (name / index / prop) ---
+    if tag == 'assign':
+        # ('assign', target, expr)
+        # target: ('name', id) | ('index', arr, idx) | ('prop', obj, 'p')
+        _, target, expr = node
+        val = _as_operand(expr, ctx)
+
+        if target[0] == 'name':
+            ctx.emit(Assign(dst=Name(target[1]), src=val))
+            return
+
+        if target[0] == 'index':
+            _, arr, idx = target
+            arr_o = _as_operand(arr, ctx)
+            idx_o = _as_operand(idx, ctx)
+            ctx.emit(Store(array=arr_o, index=idx_o, value=val))
+            return
+
+        if target[0] == 'prop':
+            _, obj, prop = target
+            obj_o = _as_operand(obj, ctx)
+            ctx.emit(SetProp(obj=obj_o, prop=prop, value=val))
+            return
+
+        raise ValueError(f"assign target no soportado: {target!r}")
+
+    # --- OPCIONAL: aliases para declaraciones (se traducen a assign si hay init) ---
+    if tag in ('vardecl', 'constdecl'):
+        # ('vardecl', name, init_or_None)
+        _, name, init = node
+        if init is not None:
+            gen_stmt(('assign', ('name', name), init), ctx)
         return
 
     # Return

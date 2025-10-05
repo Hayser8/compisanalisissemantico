@@ -1,3 +1,4 @@
+# program/src/sema/typecheck_visitor.py
 from __future__ import annotations
 from typing import List, Optional, Tuple
 from CompiscriptParser import CompiscriptParser as P
@@ -205,14 +206,78 @@ class TypeCheckVisitor(CompiscriptVisitor):
         self.loop_depth -= 1
         return False
 
+    # ===== Foreach =====
     def visitForeachStatement(self, ctx: CompiscriptParser.ForeachStatementContext):
+        """
+        foreach (it in expr) { ... }
+        - expr debe ser ArrayType
+        - el iterador 'it' toma el tipo de elemento del arreglo
+        - abrimos un scope de bloque para alinear con la pasada de declaraciones
+        """
         arr_t = self.visit(ctx.expression())
-        if not isinstance(arr_t, ArrayType):
+        elem_t: Optional[Type] = None
+
+        if isinstance(arr_t, ArrayType):
+            # Compatibilidad por si el atributo se llama distinto
+            elem_t = getattr(arr_t, "elem", None) or getattr(arr_t, "element", None)
+        else:
             self.rep.error(E_OP_TYPES, f"foreach requiere arreglo, recibido {arr_t}", ctx.expression())
-        it_name = ctx.Identifier().getText()
-        self._declare_local_or_error(ctx, VariableSymbol(name=it_name))
+
         self.loop_depth += 1
+        # Abrimos el mismo scope de bloque que usó decl_collector para el iterador
+        self.scopes.enter_block()
+
+        it_name = ctx.Identifier().getText()
+        it_sym = self.scope.resolve(it_name)
+
+        # Si por alguna razón no lo declaró decl_collector (fallback), lo declaramos aquí.
+        if it_sym is None:
+            it_sym = VariableSymbol(name=it_name)
+            self._declare_local_or_error(ctx, it_sym)
+            it_sym = self.scope.resolve(it_name)
+
+        # Asignar tipo al iterador
+        if isinstance(it_sym, VariableSymbol):
+            it_sym.resolved_type = elem_t
+
+        # Visitar cuerpo
         self.visit(ctx.block())
+
+        # Cerrar scope del foreach
+        self.scopes.pop()
+        self.loop_depth -= 1
+        return False
+
+    # (Si tu gramática usa otra regla, p.ej. ForeachStmt)
+    def visitForeachStmt(self, ctx: CompiscriptParser.ForeachStmtContext):
+        # Adaptación mínima: asume mismos hijos que ForeachStatement
+        arr_t = self.visit(ctx.expression())
+        elem_t: Optional[Type] = None
+
+        if isinstance(arr_t, ArrayType):
+            elem_t = getattr(arr_t, "elem", None) or getattr(arr_t, "element", None)
+        else:
+            self.rep.error(E_OP_TYPES, f"foreach requiere arreglo, recibido {arr_t}", ctx.expression())
+
+        self.loop_depth += 1
+        self.scopes.enter_block()
+
+        it_name = ctx.Identifier().getText()
+        it_sym = self.scope.resolve(it_name)
+        if it_sym is None:
+            it_sym = VariableSymbol(name=it_name)
+            self._declare_local_or_error(ctx, it_sym)
+            it_sym = self.scope.resolve(it_name)
+        if isinstance(it_sym, VariableSymbol):
+            it_sym.resolved_type = elem_t
+
+        # cuerpo
+        if hasattr(ctx, "block") and ctx.block():
+            self.visit(ctx.block())
+        elif hasattr(ctx, "statement") and ctx.statement():
+            self.visit(ctx.statement())
+
+        self.scopes.pop()
         self.loop_depth -= 1
         return False
 

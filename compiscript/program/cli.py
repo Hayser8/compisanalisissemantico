@@ -1,7 +1,11 @@
 # program/cli.py
-import sys, json, argparse
+import sys, json, argparse, os
 from typing import Any, Dict, List
+
+# ---- Fase de parseo (tu helper existente) ----
 from src.frontend.parser_util import parse_code
+
+# ---- Semántica (ya en tu proyecto) ----
 from src.sema.errors import ErrorReporter
 from src.sema.decl_collector import DeclarationCollector
 from src.sema.type_linker import TypeLinker
@@ -10,6 +14,13 @@ from src.sema.symbols import (
     Symbol, VariableSymbol, ConstSymbol, FieldSymbol, ParamSymbol,
     FunctionSymbol, ClassSymbol
 )
+
+# ---- AST → IR (nuevo en esta fase) ----
+from src.ast.builder_visitor import ASTBuilder
+from src.ir.lower_from_ast import lower_program as ast_lower_to_tuples
+from src.ir.adapter import IRAdapter
+from src.ir.pretty import program_to_str as ir_to_str
+
 
 def _tostr(t) -> str:
     return str(t) if t is not None else "None"
@@ -70,28 +81,51 @@ def analyze_source(source: str):
     dc = DeclarationCollector(rep); dc.visit(tree)
     TypeLinker(rep, dc).link()
     TypeCheckVisitor(rep, dc).visit(tree)
-    return rep, dc
+    return rep, dc, tree
+
+def build_ir_from_tree(tree) -> str:
+    """
+    Construye AST → lowering a tuplas → IR (Program) → pretty string.
+    Lanza excepciones si algo interno falla (no entra aquí si hay errores semánticos).
+    """
+    ast = ASTBuilder().visit(tree)
+    fn_tuples = ast_lower_to_tuples(ast)  # List[(name, params, body_tuples)]
+    adapter = IRAdapter.new()
+    for fname, params, body in fn_tuples:
+        adapter.emit_function(fname, params, body)
+    return ir_to_str(adapter.program)
 
 def main():
-    ap = argparse.ArgumentParser(description="Compilador (fase semántica) de Compiscript")
+    ap = argparse.ArgumentParser(description="Compilador (semántica + IR) de Compiscript")
     ap.add_argument("file", nargs="?", help="Archivo .cps a analizar (si se omite, lee stdin)")
     ap.add_argument("--json", action="store_true", help="Salida JSON (para IDE/tools)")
-    ap.add_argument("--symbols", action="store_true", help="Imprime tabla de símbolos")
+    ap.add_argument("--symbols", action="store_true", help="Incluir tabla de símbolos")
+    ap.add_argument("--emit-ir", action="store_true", help="Generar y devolver IR (TAC) si no hay errores")
     args = ap.parse_args()
 
     src = open(args.file, "r", encoding="utf-8").read() if args.file else sys.stdin.read()
-    rep, dc = analyze_source(src)
+    rep, dc, tree = analyze_source(src)
 
+    # JSON (consumido por tu IDE)
     if args.json:
         payload = {
             "ok": not rep.has_errors(),
             "errors": _serialize_errors(rep),
             "symbols": _serialize_symbols(dc) if args.symbols else None,
         }
+        # si piden IR y no hay errores, lo agregamos
+        if args.emit_ir and not rep.has_errors():
+            try:
+                payload["ir"] = build_ir_from_tree(tree)
+            except Exception as ex:
+                # protegemos al IDE: reportamos el fallo del backend de IR como error suave
+                payload["ok"] = False
+                payload["errors"].append({"code": "IRGEN", "message": f"Fallo generando IR: {ex}", "line": None, "col": None})
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+        # Conserva convención de salida
         sys.exit(0 if not rep.has_errors() else 1)
 
-    # Humano
+    # Modo humano (stdout)
     if rep.has_errors():
         print(rep.summary())
         sys.exit(1)
@@ -99,6 +133,9 @@ def main():
         print("OK ✅  (sin errores)")
         if args.symbols:
             print(json.dumps(_serialize_symbols(dc), ensure_ascii=False, indent=2))
+        if args.emit_ir:
+            print("\n--- IR (TAC) ---")
+            print(build_ir_from_tree(tree))
 
 if __name__ == "__main__":
     main()

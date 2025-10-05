@@ -1,3 +1,4 @@
+# program/src/sema/decl_collector.py
 from __future__ import annotations
 from typing import Dict, List, Optional
 from antlr4 import ParserRuleContext
@@ -45,6 +46,7 @@ class DeclarationCollector(CompiscriptVisitor):
     - En clases: campos y métodos (marca constructor)
     - Parámetros: detecta duplicados
     - Herencia: detecta ciclos
+    - Foreach: declara el iterador en un scope hijo (permite shadowing)
     """
     def __init__(self, reporter: ErrorReporter) -> None:
         self.reporter = reporter
@@ -55,6 +57,7 @@ class DeclarationCollector(CompiscriptVisitor):
         self.class_nodes: Dict[str, ParserRuleContext] = {}
         self.class_bases: Dict[str, Optional[str]] = {}
 
+    # ---------- scope helpers ----------
     @property
     def current_scope(self) -> Scope:
         return self.scope_stack[-1]
@@ -65,19 +68,38 @@ class DeclarationCollector(CompiscriptVisitor):
     def pop(self) -> None:
         self.scope_stack.pop()
 
+    def _push_block_scope(self, name: str = "block") -> None:
+        """
+        Abre un scope de bloque. Si tu Scope soporta new_child(name=...),
+        lo usamos; de lo contrario, usamos FunctionScope como contenedor local.
+        """
+        child = None
+        if hasattr(self.current_scope, "new_child"):
+            try:
+                child = self.current_scope.new_child(name=name)  # type: ignore[attr-defined]
+            except Exception:
+                child = None
+        if child is None:
+            child = FunctionScope(name=name, parent=self.current_scope)
+        self.push(child)
+
+    def _pop_block_scope(self) -> None:
+        self.pop()
+
+    # ---------- declaración con error si dup en MISMO scope ----------
     def declare_or_error(self, sym: Symbol, ctx: ParserRuleContext) -> None:
-        # Prohíbe redeclaración **en el mismo scope** (sí permite shadowing)
+        # Prohíbe redeclaración **en el mismo scope** (shadowing en scopes padres sí se permite)
         if not self.current_scope.declare(sym):
             self.reporter.error(E_DUPLICATE_ID, f"Identificador redeclarado: {sym.name}", ctx)
 
-    # Entrypoint
+    # ---------- Entrypoint ----------
     def visitProgram(self, ctx: CompiscriptParser.ProgramContext):
         for st in ctx.statement():
             self.visit(st)
         self._check_inheritance_cycles()
         return self.global_scope
 
-    # ---- Declaraciones top-level ----
+    # ---------- Declaraciones top-level ----------
     def visitVariableDeclaration(self, ctx: CompiscriptParser.VariableDeclarationContext):
         # Solo declaramos en global o clase (NO locales)
         if self.current_scope.kind not in ("global", "class"):
@@ -131,7 +153,7 @@ class DeclarationCollector(CompiscriptVisitor):
         self.pop()
         return None
 
-    # ---- Clases y miembros ----
+    # ---------- Clases y miembros ----------
     def visitClassDeclaration(self, ctx: CompiscriptParser.ClassDeclarationContext):
         name = ctx.Identifier(0).getText()
         base_name = ctx.Identifier(1).getText() if len(ctx.Identifier()) > 1 else None
@@ -187,7 +209,53 @@ class DeclarationCollector(CompiscriptVisitor):
         self.pop()
         return None
 
-    # ---- Ciclos de herencia ----
+    # ---------- Foreach (crea scope de bloque + declara iterador) ----------
+    def _visit_foreach_core(self, ctx, get_ident, get_expr, get_body):
+        """
+        Factor común para soportar variantes de regla.
+        - get_ident(ctx) -> Token/str con el nombre del iterador
+        - get_expr(ctx)  -> subctx de la expresión iterable
+        - get_body(ctx)  -> subctx del statement o block del cuerpo
+        """
+        self._push_block_scope(name="foreach")
+        try:
+            it_name = get_ident(ctx)
+            # Declaramos el iterador en el scope HIJO
+            it_sym = VariableSymbol(name=it_name, type_ann=None)
+            if not self.current_scope.declare(it_sym):
+                self.reporter.error(E_DUPLICATE_ID, f"Identificador redeclarado: {it_name}", ctx)
+
+            # Visitar iterable y cuerpo (por si hay más declaraciones anidadas)
+            expr_ctx = get_expr(ctx)
+            if expr_ctx is not None:
+                self.visit(expr_ctx)
+
+            body_ctx = get_body(ctx)
+            if body_ctx is not None:
+                self.visit(body_ctx)
+        finally:
+            self._pop_block_scope()
+        return None
+    # ---------- Foreach (crea scope de bloque + declara iterador) ----------
+    def visitForeachStatement(self, ctx: CompiscriptParser.ForeachStatementContext):
+        # abrir scope de bloque para el foreach (permite shadowing del iterador)
+        self._push_block_scope(name="foreach")
+        try:
+            it_name = ctx.Identifier().getText()
+            it_sym = VariableSymbol(name=it_name, type_ann=None)
+            if not self.current_scope.declare(it_sym):
+                self.reporter.error(E_DUPLICATE_ID, f"Identificador redeclarado: {it_name}", ctx)
+
+            # visitar el iterable y el cuerpo, por si declaran cosas adentro
+            self.visit(ctx.expression())
+            self.visit(ctx.block())
+        finally:
+            self._pop_block_scope()
+        return None
+
+
+
+    # ---------- Ciclos de herencia ----------
     def _check_inheritance_cycles(self):
         WHITE, GRAY, BLACK = 0, 1, 2
         color: Dict[str, int] = {k: WHITE for k in self.class_bases.keys()}
@@ -206,7 +274,7 @@ class DeclarationCollector(CompiscriptVisitor):
             if color.get(cname, WHITE) == WHITE:
                 dfs(cname)
 
-    # ---- Keys helper ----
+    # ---------- Keys helper ----------
     def _fn_key(self, fn: FunctionSymbol) -> str:
         return f"::{fn.name}"
 
