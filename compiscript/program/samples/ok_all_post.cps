@@ -2,9 +2,9 @@
 const PI: float = 3.1415926;
 
 let a: integer = 3;
-let b: float = a;              
+let b: float = a;               // int -> float implícito
 let s: string = "hola";
-let t: string = s + " mundo"; 
+let t: string = s + " mundo";   // concat de strings
 
 let xs: integer[] = [1, 2, 3, 4];
 let ys: float[]   = [1.0, 2.0, 3.5];
@@ -24,10 +24,10 @@ function pokeArray() {
   ys[1] = ys[1] + 0.5;
 }
 
-let sumNum: float = 1.0 + a;         
-let prod: float = (a * 2) / 3.0;     
+let sumNum: float = 1.0 + a;         // num + num -> float
+let prod: float = (a * 2) / 3.0;     // mezcla -> float
 let rest: integer = 10 - 7;
-let modOk: float = 5.0 % 2;          
+let modOk: float = 5.0 % 2;          // % numérico soportado
 
 let flag: boolean = (a < 10) && (s == "hola") || !(false);
 let tern: integer = (a > 0) ? a : 0; // condicional
@@ -71,7 +71,7 @@ function sumWithLoops(): integer {
     j = j + 1;
   } while (j < 2);
 
-  // "for" simulado con while para evitar asignación en la sección de actualización
+  // "for" reemplazado por while (update como statement)
   let k: integer = 0;
   while (k < 3) {
     if (k == 1) { 
@@ -83,9 +83,11 @@ function sumWithLoops(): integer {
     k = k + 1;
   }
 
-  // foreach: iterador predeclarado y tipado
-  foreach (it in xs) {
-    acc = acc + it;
+  // (sin foreach) – iteración explícita por índice
+  let ix: integer = 0;
+  while (ix < 4) {
+    acc = acc + xs[ix];
+    ix = ix + 1;
   }
 
   return acc;
