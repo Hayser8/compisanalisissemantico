@@ -1,3 +1,4 @@
+# compiscript/ide/theming.py
 from __future__ import annotations
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QApplication

@@ -1,3 +1,4 @@
+# compiscript/ide/runner.py
 from __future__ import annotations
 from PySide6.QtCore import QObject, Signal, QProcess
 import json, os, sys, shutil
@@ -102,15 +103,16 @@ class CliRunner(QObject):
         py = self.defaults.get('python_path', sys.executable or 'python3')
         workdir = os.path.dirname(cli)
 
+        args = [cli, '--json', '--symbols', '--emit-ir', file_path]
         self.output.emit(
-            f'[IDE] exec(py): "{py}" "{cli}" --json --symbols "{file_path}"\n'
+            f'[IDE] exec(py): "{py}" "{cli}" --json --symbols --emit-ir "{file_path}"\n'
             f'[IDE] cwd: {workdir}\n'
         )
 
         self.proc = QProcess(self)
         self.proc.setWorkingDirectory(workdir)
         self.proc.setProgram(py)
-        self.proc.setArguments([cli, '--json', '--symbols', file_path])
+        self.proc.setArguments(args)
         self._wire_process()
         self.proc.start()
 
@@ -134,7 +136,7 @@ class CliRunner(QObject):
             'docker', 'run', '--rm', '-i',
             '-v', f'{host_dir}:/program',
             '-w', '/program',
-            image, 'python3', '/program/cli.py', '--json', '--symbols', container_file
+            image, 'python3', '/program/cli.py', '--json', '--symbols', '--emit-ir', container_file
         ]
 
         self.output.emit('[IDE] Fallback a Docker\n')
@@ -170,7 +172,6 @@ class CliRunner(QObject):
         except Exception:
             parsed = None
 
-
         if parsed is not None:
             self.finished.emit(parsed)
             self.proc = None
@@ -179,7 +180,6 @@ class CliRunner(QObject):
             self._file_path = ''
             return
 
-
         looks_bad = (code != 0) or ('Traceback' in raw) or ('No module named antlr4' in raw)
         if self._mode == 'python' and looks_bad and _docker_available():
             self.output.emit(f'[IDE] python falló (exit={code}); intentando Docker…\n')
@@ -187,7 +187,6 @@ class CliRunner(QObject):
             self._buf = ''
             self._run_docker(self._file_path)
             return
-
 
         data = {'ok': False, 'errors': [{'message': f'No JSON en salida (exit={code})'}], 'raw': raw}
         self.finished.emit(data)

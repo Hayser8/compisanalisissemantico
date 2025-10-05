@@ -1,3 +1,4 @@
+# compiscript/ide/main.py
 from __future__ import annotations
 from PySide6.QtWidgets import QApplication
 import sys

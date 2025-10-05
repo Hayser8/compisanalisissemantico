@@ -1,3 +1,4 @@
+# compiscript/ide/app.py
 from __future__ import annotations
 from PySide6.QtCore import Qt, QIODevice, QByteArray
 from PySide6.QtGui import QAction, QTextCursor, QPixmap
@@ -21,7 +22,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Compiscript IDE")
         self.resize(1200, 800)
         self.theme = "dark"
-        self.defaults = find_defaults()               
+        self.defaults = find_defaults()
         self.program_dir = self.defaults.get("program_dir", os.getcwd())
 
         tb = QToolBar("Main")
@@ -74,11 +75,15 @@ class MainWindow(QMainWindow):
         self.problems.setHeaderLabels(["Code", "Line", "Col", "Message"])
         self.problems.itemActivated.connect(self.on_problem_jump)
 
-        self.output = QPlainTextEdit(self)    
+        self.output = QPlainTextEdit(self)
         self.output.setReadOnly(True)
 
-        self.pretty = QPlainTextEdit(self)   
+        self.pretty = QPlainTextEdit(self)
         self.pretty.setReadOnly(True)
+
+        # NUEVO: panel TAC/IR
+        self.tac = QPlainTextEdit(self)
+        self.tac.setReadOnly(True)
 
         # Visor de imagen para el AST (Graphviz)
         self.astLabel = QLabel("AST image will appear here")
@@ -91,10 +96,11 @@ class MainWindow(QMainWindow):
         bottom.addTab(self.problems, "Problems")
         bottom.addTab(self.output, "Output")
         bottom.addTab(self.pretty, "Report")
+        bottom.addTab(self.tac, "TAC")          # <-- nueva pestaña
         bottom.addTab(self.astScroll, "Tree")
 
         from PySide6.QtWidgets import QDockWidget
-        dock = QDockWidget("Problems / Output / Report / Tree", self)
+        dock = QDockWidget("Problems / Output / Report / TAC / Tree", self)
         dock.setWidget(bottom)
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
 
@@ -215,6 +221,7 @@ class MainWindow(QMainWindow):
             self.problems.clear()
             self.outline.clear()
             self.pretty.clear()
+            self.tac.clear()  # limpiar TAC
             self.astLabel.setText("Generating AST…")
 
             abs_path = os.path.abspath(path)
@@ -234,7 +241,7 @@ class MainWindow(QMainWindow):
         self.output.insertPlainText(text)
         self.output.moveCursor(QTextCursor.End)
 
-    # CLI terminao
+    # CLI terminado
     def on_run_finished(self, data: dict):
         self.append_output(f"[IDE] finished; ok={data.get('ok', False)}\n")
 
@@ -250,9 +257,17 @@ class MainWindow(QMainWindow):
         self.populate_outline(syms)
         self.update_pretty_report(data)
 
+        # NUEVO: mostrar TAC si lo envía el CLI
+        ir_txt = data.get("ir") if isinstance(data, dict) else None
+        if isinstance(ir_txt, str) and ir_txt.strip():
+            self.tac.setPlainText(ir_txt)
+        else:
+            if data.get("ok") is False:
+                self.tac.setPlainText("(Sin IR: hay errores en el código)")
+
         self.status.showMessage("Run finished", 3000)
 
-    # Reporte 
+    # Reporte
     def update_pretty_report(self, data: dict):
         lines = []
         if not isinstance(data, dict):

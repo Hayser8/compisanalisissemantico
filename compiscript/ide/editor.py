@@ -1,3 +1,4 @@
+# compiscript/ide/editor.py
 from __future__ import annotations
 from PySide6.QtCore import QRect, Qt, QSize
 from PySide6.QtGui import QColor, QPainter, QTextFormat, QSyntaxHighlighter, QTextCharFormat, QFont
