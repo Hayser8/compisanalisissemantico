@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Union
 
-# ---------- Operandos ----------
 
 @dataclass(frozen=True)
 class Operand:
@@ -11,12 +10,12 @@ class Operand:
 
 @dataclass(frozen=True)
 class Temp(Operand):
-    name: str                  # p.ej. "t0"
+    name: str                  
     type_hint: Optional[str] = None
 
 @dataclass(frozen=True)
 class Name(Operand):
-    name: str                  # nombre estable (var/param/global/campo)
+    name: str                 
     type_hint: Optional[str] = None
 
 @dataclass(frozen=True)
@@ -26,9 +25,8 @@ class Const(Operand):
 
 @dataclass(frozen=True)
 class Label(Operand):
-    name: str                  # p.ej. "L0"
+    name: str                  
 
-# ---------- Instrucciones ----------
 
 @dataclass
 class Instr:
@@ -36,29 +34,29 @@ class Instr:
 
 @dataclass
 class LabelInstr(Instr):
-    label: Label               # Impresa como 'Lk:'
+    label: Label               
 
 @dataclass
 class Assign(Instr):
-    dst: Operand               # Temp|Name
-    src: Operand               # Temp|Name|Const
+    dst: Operand               
+    src: Operand               
 
 @dataclass
 class UnaryOp(Instr):
     dst: Operand
-    op: str                    # '-', '!'
+    op: str                    
     value: Operand
 
 @dataclass
 class BinOp(Instr):
     dst: Operand
-    op: str                    # '+', '-', '*', '/', '%', '==', '!=', '<', '<=', '>', '>=', '&&', '||'
+    op: str                   
     left: Operand
     right: Operand
 
 @dataclass
 class IfGoto(Instr):
-    cond: Operand              # boolean temp/name
+    cond: Operand             
     target: Label
 
 @dataclass
@@ -67,8 +65,8 @@ class Goto(Instr):
 
 @dataclass
 class Call(Instr):
-    dst: Optional[Operand]     # None si call es 'void'
-    func: str                  # nombre o callee resuelto
+    dst: Optional[Operand]    
+    func: str                 
     args: List[Operand] = field(default_factory=list)
 
 @dataclass
@@ -79,8 +77,8 @@ class Return(Instr):
 @dataclass
 class Load(Instr):
     dst: Operand
-    array: Operand             # ref a arreglo
-    index: Operand             # índice integer
+    array: Operand             
+    index: Operand             
 
 @dataclass
 class Store(Instr):
@@ -88,7 +86,6 @@ class Store(Instr):
     index: Operand
     value: Operand
 
-# Objetos / campos
 @dataclass
 class GetProp(Instr):
     dst: Operand
@@ -107,8 +104,6 @@ class NewObject(Instr):
     class_name: str
     args: List[Operand] = field(default_factory=list)
 
-# ---------- Bloques / Funciones / Programa ----------
-
 @dataclass
 class BasicBlock:
     label: Label
@@ -123,7 +118,6 @@ class Function:
     params: List[str] = field(default_factory=list)
     blocks: List[BasicBlock] = field(default_factory=list)
 
-    # metadata opcional para backend
     frame_size: int = 0
 
     def new_block(self, label: Label) -> BasicBlock:

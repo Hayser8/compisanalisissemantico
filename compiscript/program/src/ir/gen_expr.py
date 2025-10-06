@@ -6,26 +6,25 @@ from .context import IRGenContext
 from .model import (
     Operand, Temp, Name, Const, Label, LabelInstr,
     Assign, UnaryOp, BinOp, IfGoto, Goto, Return,
-    Load, GetProp, NewObject, Call, Store  # <-- Store para inicializar arrays
+    Load, GetProp, NewObject, Call, Store 
 )
 
 # Mini-IR de expresiones (tuplas) aceptada por gen_expr:
 # ('const', value)
 # ('name', 'a')
-# ('un', op, expr)                        # op in {'-', '!'}
-# ('bin', op, left, right)                # op in {'+','-','*','/','%','==','!=','<','<=','>','>=','&&','||'}
+# ('un', op, expr)                       
+# ('bin', op, left, right)               
 # ('tern', cond, then_expr, else_expr)
-# ('index', arr, idx)                     # lectura a[i] -> Load
-# ('prop', obj, 'p')                      # lectura obj.p -> GetProp
-# ('new', 'Clase', [args])                # construcción -> NewObject
-# ('call', 'fn', [args])                  # llamada     -> Call
-# ('array', [e1, e2, ...])                # literal de arreglo -> __new_array + Store
+# ('index', arr, idx)                    
+# ('prop', obj, 'p')                     
+# ('new', 'Clase', [args])               
+# ('call', 'fn', [args])                 
+# ('array', [e1, e2, ...])               
 
 Expr = Tuple[Any, ...]
 
 
 def _as_operand(node: Expr, ctx: IRGenContext) -> Operand:
-    """Convierte directos a Operand sin emitir TAC: const y name."""
     tag = node[0]
     if tag == 'const':
         return Const(node[1])
@@ -36,11 +35,6 @@ def _as_operand(node: Expr, ctx: IRGenContext) -> Operand:
 
 
 def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
-    """
-    Genera TAC para 'node' y devuelve un Operand (Temp/Name/Const).
-    Para const/names puede devolverlos directo; para operaciones,
-    devuelve un Temp con el resultado.
-    """
     tag = node[0]
 
     # Literales y nombres
@@ -49,7 +43,7 @@ def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
     if tag == 'name':
         return Name(node[1])
 
-    # Unarios: ('un', op, expr)
+    # unario: ('un', op, expr)
     if tag == 'un':
         _, op, sub = node
         v = _as_operand(sub, ctx)
@@ -57,7 +51,7 @@ def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
         ctx.emit(UnaryOp(dst=dst, op=op, value=v))
         return dst
 
-    # Binarios: ('bin', op, l, r)
+    # binario: ('bin', op, l, r)
     if tag == 'bin':
         _, op, l, r = node
         lo = _as_operand(l, ctx)
@@ -66,7 +60,7 @@ def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
         ctx.emit(BinOp(dst=dst, op=op, left=lo, right=ro))
         return dst
 
-    # Ternario: ('tern', cond, t1, t2)
+    # ternario: ('tern', cond, t1, t2)
     if tag == 'tern':
         _, c, t1, t2 = node
         c_op = _as_operand(c, ctx)
@@ -91,7 +85,7 @@ def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
         ctx.emit(LabelInstr(L_end))
         return dst
 
-    # Indexación de lectura: ('index', arr, idx) -> t = load arr[idx]
+    # indexación de lectura: t = load arr[idx]
     if tag == 'index':
         _, arr, idx = node
         arr_o = _as_operand(arr, ctx)
@@ -100,7 +94,7 @@ def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
         ctx.emit(Load(dst=dst, array=arr_o, index=idx_o))
         return dst
 
-    # Acceso a propiedad: ('prop', obj, 'p') -> t = get obj.p
+    # propiedad: t = get obj.p
     if tag == 'prop':
         _, obj, prop = node
         obj_o = _as_operand(obj, ctx)
@@ -108,7 +102,7 @@ def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
         ctx.emit(GetProp(dst=dst, obj=obj_o, prop=prop))
         return dst
 
-    # new Clase(args): ('new', 'Clase', [args]) -> t = new Clase(args)
+    # new: t = new Clase(args)
     if tag == 'new':
         _, cname, args = node
         args_o = [_as_operand(a, ctx) for a in args]
@@ -116,25 +110,22 @@ def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
         ctx.emit(NewObject(dst=dst, class_name=cname, args=args_o))
         return dst
 
-    # Llamada: ('call', 'fn', [args]) -> t = call fn, args
+    # llamada: t = call fn(args)
     if tag == 'call':
         _, callee, args = node
         if not isinstance(callee, str):
-            # De momento, sólo calls por nombre.
             raise ValueError("call con callee no-string aún no soportado")
         args_o = [_as_operand(a, ctx) for a in args]
         dst = ctx.temp_alloc.new_temp()
         ctx.emit(Call(dst=dst, func=callee, args=args_o))
         return dst
 
-    # Literal de arreglo: ('array', [e1, e2, ...])
+    # arreglo literal
     if tag == 'array':
         _, elems = node
         n = len(elems)
         dst = ctx.temp_alloc.new_temp()
-        # Crear arreglo de tamaño n
         ctx.emit(Call(dst=dst, func="__new_array", args=[Const(n)]))
-        # Inicializar elementos
         for i, e in enumerate(elems):
             val = _as_operand(e, ctx)
             ctx.emit(Store(array=dst, index=Const(i), value=val))

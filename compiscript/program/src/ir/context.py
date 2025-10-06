@@ -16,15 +16,14 @@ class IRGenContext:
     current_function: Optional[Function] = None
     current_block: Optional[BasicBlock] = None
 
-    # Pila de bucles para break/continue: (label_break, label_continue)
+    # pila para manejar break y continue: (label_break, label_continue)
     _loop_stack: List[Tuple[Label, Label]] = field(default_factory=list)
 
-    # ---- helpers de creación ----
+    # crear y cerrar funciones
     def begin_function(self, name: str, params: Optional[List[str]] = None) -> Function:
         fn = Function(name=name, params=list(params or []))
         self.program.add_function(fn)
         self.current_function = fn
-        # crear primer bloque por defecto (con label emitido explícitamente)
         self.new_block(self.label_alloc.new_label())
         return fn
 
@@ -38,7 +37,6 @@ class IRGenContext:
             raise RuntimeError("No hay función activa para crear bloque")
         lab = label or self.label_alloc.new_label()
         bb = self.current_function.new_block(lab)
-        # Cada bloque empieza con su LabelInstr
         bb.add(LabelInstr(lab))
         self.current_block = bb
         return bb
@@ -48,7 +46,7 @@ class IRGenContext:
             raise RuntimeError("No hay bloque activo para emitir instrucciones")
         self.current_block.add(instr)
 
-    # ---- bucles: break/continue ----
+    # soporte de bucles: break y continue
     def push_loop(self, label_break: Label, label_continue: Label) -> None:
         self._loop_stack.append((label_break, label_continue))
 

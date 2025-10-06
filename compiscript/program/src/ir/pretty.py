@@ -66,7 +66,6 @@ def function_to_str(fn: Function) -> str:
     params = ", ".join(fn.params)
     out.append(f"function {fn.name}({params}):")
     for bb in fn.blocks:
-        # asegurar que el label se emita (si no hay LabelInstr, lo agregamos virtual)
         has_label = any(isinstance(x, LabelInstr) for x in bb.instrs)
         if not has_label:
             out.append(f"{bb.label.name}:")
