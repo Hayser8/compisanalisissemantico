@@ -221,16 +221,16 @@ class MainWindow(QMainWindow):
             self.problems.clear()
             self.outline.clear()
             self.pretty.clear()
-            self.tac.clear()  # limpiar TAC
+            self.tac.clear() 
             self.astLabel.setText("Generating AST…")
 
             abs_path = os.path.abspath(path)
             self.append_output("[IDE] Run clicked\n")
             self.append_output(f"[IDE] Running on {abs_path}\n")
 
-            # 1) Corre el checker (CLI) -> Problems/Report/Outline
+            # orre el checker CLI
             self.runner.run_file(abs_path)
-            # 2) Genera imagen del AST (DOT->PNG)
+            # AST IMAGEN
             self.generate_ast_image(abs_path)
         except Exception as e:
             self.append_output(f"[IDE] on_run exception: {e!r}\n")
@@ -257,7 +257,7 @@ class MainWindow(QMainWindow):
         self.populate_outline(syms)
         self.update_pretty_report(data)
 
-        # NUEVO: mostrar TAC si lo envía el CLI
+        # mostrar TAC si lo envía el CLI
         ir_txt = data.get("ir") if isinstance(data, dict) else None
         if isinstance(ir_txt, str) and ir_txt.strip():
             self.tac.setPlainText(ir_txt)
@@ -336,7 +336,7 @@ class MainWindow(QMainWindow):
         py = self.defaults.get("python_path")
         workdir = self.program_dir or os.path.dirname(cps_path)
 
-        # (1) Ejecuta el generador DOT del AST
+        # Ejecuta el generador DOT del AST
         self._proc_ast_dump = QProcess(self)
         self._proc_ast_dump.setWorkingDirectory(workdir)
         self._proc_ast_dump.setProgram(py)
@@ -349,12 +349,11 @@ class MainWindow(QMainWindow):
                 self._last_dot += out
 
         def on_ast_finished(_code, _status):
-            on_ast_ready()  # drenar buffer
+            on_ast_ready()  
             dot_txt = (self._last_dot or "").strip()
             if not dot_txt or "digraph" not in dot_txt:
                 self.astLabel.setText("No se pudo generar DOT del AST.\n¿Está correcto el archivo?\n\nSalida:\n" + (self._last_dot or "(vacía)"))
                 return
-            # (2) Render con Graphviz (dot)
             self.render_dot_to_png(dot_txt, workdir)
 
         self._proc_ast_dump.readyReadStandardOutput.connect(on_ast_ready)
@@ -366,7 +365,6 @@ class MainWindow(QMainWindow):
         self._proc_ast_dump.start()
 
     def render_dot_to_png(self, dot_text: str, workdir: str):
-        # Ejecuta 'dot' y recibe PNG por stdout
         self._proc_dot = QProcess(self)
         self._proc_dot.setWorkingDirectory(workdir)
         self._proc_dot.setProgram("dot")
@@ -406,7 +404,6 @@ class MainWindow(QMainWindow):
         self._proc_dot.readyReadStandardError.connect(on_dot_out)
         self._proc_dot.finished.connect(on_dot_finished)
 
-        # Enviar DOT a 'dot' por stdin
         self._proc_dot.start()
         if not self._proc_dot.waitForStarted(5000):
             self.astLabel.setText("No se pudo iniciar 'dot'. ¿Está Graphviz instalado?")
