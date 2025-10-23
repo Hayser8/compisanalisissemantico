@@ -6,25 +6,36 @@ from .context import IRGenContext
 from .model import (
     Operand, Temp, Name, Const, Label, LabelInstr,
     Assign, UnaryOp, BinOp, IfGoto, Goto, Return,
-    Load, GetProp, NewObject, Call, Store 
+    Load, GetProp, NewObject, Call, Store
 )
 
 # Mini-IR de expresiones (tuplas) aceptada por gen_expr:
 # ('const', value)
 # ('name', 'a')
-# ('un', op, expr)                       
-# ('bin', op, left, right)               
+# ('un', op, expr)
+# ('bin', op, left, right)
 # ('tern', cond, then_expr, else_expr)
-# ('index', arr, idx)                    
-# ('prop', obj, 'p')                     
-# ('new', 'Clase', [args])               
-# ('call', 'fn', [args])                 
-# ('array', [e1, e2, ...])               
+# ('index', arr, idx)
+# ('prop', obj, 'p')
+# ('new', 'Clase', [args])
+# ('call', 'fn', [args])
+# ('array', [e1, e2, ...])
 
 Expr = Tuple[Any, ...]
 
 
-def _as_operand(node: Expr, ctx: IRGenContext) -> Operand:
+def _as_operand(node: Expr | Operand, ctx: IRGenContext) -> Operand:
+    """
+    Convierte un nodo declarativo o un Operand ya-resuelto en Operand.
+    - Si ya es Operand (Temp/Name/Const/Label), lo regresa tal cual.
+    - Si es tupla ('const', v) / ('name', id), crea el Operand directo.
+    - Para el resto de tuplas, delega a gen_expr (que emite TAC y devuelve un Temp).
+    """
+    # Aceptar Operands ya construidos (arregla TypeError en tests de return/pretty/call)
+    if isinstance(node, Operand):
+        return node
+
+    # A partir de aquí esperamos tuplas ('tag', ...)
     tag = node[0]
     if tag == 'const':
         return Const(node[1])
