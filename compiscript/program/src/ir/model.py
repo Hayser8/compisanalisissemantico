@@ -136,3 +136,15 @@ class Program:
 
     def add_function(self, fn: Function) -> None:
         self.functions.append(fn)
+
+@dataclass
+class MakeClosure(Instr):
+    dst: Operand                      # Temp|Name
+    code: Union[Label, str]           # etiqueta del codeptr
+    captures: List[Operand] = field(default_factory=list)
+
+@dataclass
+class CallClosure(Instr):
+    dst: Optional[Operand]            # Temp|Name|None
+    closure: Operand                  # puntero al closure
+    args: List[Operand] = field(default_factory=list)  # Paso 10: hasta 3

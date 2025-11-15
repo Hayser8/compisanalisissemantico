@@ -4,7 +4,7 @@ from typing import List
 from .model import (
     Program, Function, BasicBlock, Instr,
     LabelInstr, Assign, UnaryOp, BinOp, IfGoto, Goto, Call, Return,
-    Load, Store, GetProp, SetProp, NewObject,
+    Load, Store, GetProp, SetProp, NewObject, MakeClosure, CallClosure, 
     Operand, Temp, Name, Const, Label
 )
 
@@ -38,6 +38,17 @@ def _p_instr(i: Instr) -> List[str]:
     if isinstance(i, Store):       return [f"store {_p_oprnd(i.array)}[{_p_oprnd(i.index)}], {_p_oprnd(i.value)}"]
     if isinstance(i, GetProp):     return [f"{_p_oprnd(i.dst)} = get {_p_oprnd(i.obj)}.{i.prop}"]
     if isinstance(i, SetProp):     return [f"set {_p_oprnd(i.obj)}.{i.prop}, {_p_oprnd(i.value)}"]
+    if isinstance(i, MakeClosure):
+        code = i.code.name if isinstance(i.code, Label) else str(i.code)
+        caps = ", ".join(_p_oprnd(a) for a in i.captures)
+        inside = code if not caps else f"{code}, {caps}"
+        return [f"{_p_oprnd(i.dst)} = make_closure({inside})"]
+
+    if isinstance(i, CallClosure):
+        args = ", ".join(_p_oprnd(a) for a in i.args)
+        if i.dst is None:
+            return [f"call_closure {_p_oprnd(i.closure)}({args})"] if args else [f"call_closure {_p_oprnd(i.closure)}()"]
+        return [f"{_p_oprnd(i.dst)} = call_closure {_p_oprnd(i.closure)}({args})"] if args else [f"{_p_oprnd(i.dst)} = call_closure {_p_oprnd(i.closure)}()"]
     if isinstance(i, NewObject):
         args = ", ".join(_p_oprnd(a) for a in i.args)
         return [f"{_p_oprnd(i.dst)} = new {i.class_name}({args})"]
