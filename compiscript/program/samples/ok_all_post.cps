@@ -46,13 +46,18 @@ function fib(n: integer): integer {
   return fib(n - 1) + fib(n - 2);
 }
 
+// ======= FUNCIÓN ANIDADA CON CLOSURE =======
 function outer(a0: integer): integer {
   let bias: integer = 10;
+
+  // inner captura a0 y bias desde el entorno de outer
   function inner(b: integer): integer {
     return a0 + bias + b;
   }
+
   return inner(5);
 }
+// ===========================================
 
 function sumWithLoops(): integer {
   let acc: integer = 0;
@@ -148,7 +153,7 @@ function runAll(): integer {
   let r1: integer = sum2(a, 2);
   let r2: integer = factorial(6);
   let r3: integer = fib(8);
-  let r4: integer = outer(3);
+  let r4: integer = outer(3);          // aquí usamos la función anidada
   let r5: integer = sumWithLoops();
 
   let o: A = new A(10);

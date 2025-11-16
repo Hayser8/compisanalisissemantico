@@ -1,3 +1,4 @@
+# compiscript/program/src/backend/mips/emitter.py
 from __future__ import annotations
 from typing import List, Dict, Callable, Tuple, Any
 import re
@@ -11,7 +12,12 @@ from src.ir.model import (
     CallClosure,
     Name,
 )
-from .emit_utils import emit_prologue, emit_epilogue, emit_copy_params_to_homes
+from .emit_utils import (
+    emit_prologue,
+    emit_epilogue,
+    emit_copy_params_to_homes,
+    asm_sw_fp,
+)
 from .frame_plan import FramePlan
 from .regalloc import RegAlloc
 from .templates import emit_for_instr
@@ -244,20 +250,26 @@ def emit_function(
         emit_prologue(frame_bytes, save_s=getattr(ra, "s_regs_in_use", []))
     )
 
-    # ------------------------------------------------------------------
+     # ------------------------------------------------------------------
     # COPIA DE PARÁMETROS A SUS "HOMES" EN EL FRAME
-    #
-    # Aquí está el FIX IMPORTANTE:
-    # Usamos plan.need_param_homes (que incluye 'this' / ambiente) en
-    # lugar de len(fn.params), para no perder parámetros implícitos.
     # ------------------------------------------------------------------
     n_homes = getattr(plan, "need_param_homes", 0)
     if n_homes and getattr(plan, "param_home_off", None):
         homes: List[int] = [plan.param_home_off[i] for i in range(n_homes)]
         out.extend(emit_copy_params_to_homes(homes, frame_bytes))
 
+    # ------------------------------------------------------------------
+    # Si el frame tiene un local llamado 'this', copiamos a0 allí.
+    # Esto conecta el argumento implícito 'this' (en $a0) con el
+    # slot que el regalloc usa cuando ve el Name('this').
+    # ------------------------------------------------------------------
+    local_off = getattr(plan, "local_off", {})
+    if "this" in local_off:
+        asm_sw_fp(out, "$a0", local_off["this"])
+
     # Cuerpo de la función
     out.extend(body)
+
 
     # Epílogo
     out.append(f"{epilogue_label}:")

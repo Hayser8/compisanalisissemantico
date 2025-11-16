@@ -1,3 +1,4 @@
+# compiscript/program/cli.py
 import sys, json, argparse, os, subprocess, tempfile
 from typing import Any, Dict, List, Tuple, Optional
 
@@ -329,19 +330,41 @@ class SimpleFramePlan:
 
 
 def _plan_for(fn: Function) -> SimpleFramePlan:
-    nparams = len(fn.params) if hasattr(fn, "params") else 0
-    # Homes de parámetros: -4, -8, -12, ...
-    param_homes: Dict[int, int] = {i: -(4 * (i + 1)) for i in range(nparams)}
+    # Parámetros explícitos según el IR (lo que sale en function sum2(x, y), etc.)
+    nparams_ir = len(fn.params) if hasattr(fn, "params") else 0
+
+    name = fn.name
+    # Consideramos "método" a funciones con Class::metodo o Class__metodo
+    # pero ignoramos nombres de runtime que empiezan con "__".
+    is_method = ("::" in name) or ("__" in name and not name.startswith("__"))
+
+    # 1) Homes de parámetros EXPLÍCITOS: -4, -8, -12, ...
+    param_homes: Dict[int, int] = {i: -(4 * (i + 1)) for i in range(nparams_ir)}
+
+    # 2) Locals: aquí vamos a reservar un slot para 'this' en métodos.
     local_offsets: Dict[str, int] = {}
 
-    # tamaño mínimo: 8; si hay params, usamos 16 para tener margen
-    frame_size = 16 if nparams > 0 else 8
-    if frame_size <= 0:
-        frame_size = 8
-    if frame_size % 4 != 0:
-        frame_size += (4 - frame_size % 4)
+    if is_method:
+        # Slot local para 'this' justo debajo de los parámetros:
+        # si hay 0 params → this en -4($fp)
+        # si hay 1 param  → this en -8($fp), etc.
+        local_offsets["this"] = -(4 * (nparams_ir + 1))
+
+    # 3) Tamaño base del frame (param homes + locals + 8 bytes de $fp/$ra)
+    total_slots = nparams_ir + len(local_offsets)  # cada slot = 4 bytes
+    base_bytes = 4 * total_slots + 8              # +8 para fp/ra
+
+    if base_bytes <= 0:
+        base_bytes = 8
+    # Alinear a múltiplo de 4
+    if base_bytes % 4 != 0:
+        base_bytes += (4 - base_bytes % 4)
+
+    # Algo de margen; emit_function luego sube esto al mínimo global de 256 bytes
+    frame_size = max(16, base_bytes)
 
     return SimpleFramePlan(fn, frame_size, local_offsets, param_homes)
+
 
 
 # ============================================================
@@ -386,19 +409,44 @@ def _find_mars_jar() -> Optional[str]:
 
 
 def run_in_mars(asm_text: str) -> int:
+    import shutil
+
+    # 1) Guardar en directorio temporal
     tmpdir = tempfile.mkdtemp(prefix="cps_mars_")
     asm_path = os.path.join(tmpdir, "out.asm")
     with open(asm_path, "w", encoding="utf-8") as f:
         f.write(asm_text)
 
+    # 2) Copia adicional a un archivo estable en el proyecto
+    try:
+        stable_path = os.path.join(os.getcwd(), "out_last.asm")
+        shutil.copy(asm_path, stable_path)
+        print(f"[MARS] Copié ASM a {stable_path}")
+    except Exception as ex:
+        print(f"[MARS] WARN: no se pudo copiar ASM fijo: {ex}")
+
+    # 3) Localizar el JAR de MARS
     mars = _find_mars_jar()
     if mars is None:
-        print(f"[MARS] JAR no encontrado. ASM guardado en:\n  {asm_path}\nÁbrelo manualmente en MARS.")
+        print(
+            f"[MARS] JAR no encontrado. ASM guardado en:\n"
+            f"  {asm_path}\n"
+            f"Ábrelo manualmente en MARS."
+        )
         return 0
+
+    # 4) Ejecutar MARS sobre el ASM
+    # Si quieres forzar modo solo consola, prueba: ["java", "-jar", mars, "nc", asm_path]
     cmd = ["java", "-jar", mars, asm_path]
     print(f"[MARS] Ejecutando: {' '.join(cmd)}")
+
     try:
-        return subprocess.call(cmd)
+        rc = subprocess.call(cmd)
+        if rc == 0:
+            print("[MARS] Ejecución completada correctamente (rc=0).")
+        else:
+            print(f"[MARS] MARS terminó con código {rc}. ASM en: {asm_path}")
+        return rc
     except Exception as ex:
         print(f"[MARS] No se pudo ejecutar MARS: {ex}\nASM en: {asm_path}")
         return 1
@@ -447,7 +495,7 @@ def main():
         print(rep.summary())
         sys.exit(1)
 
-    print("OK ✅  (sin errores)")
+    print("OK  (sin errores)")
     if args.symbols:
         print(json.dumps(_serialize_symbols(dc), ensure_ascii=False, indent=2))
 
