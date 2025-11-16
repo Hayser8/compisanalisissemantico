@@ -8,77 +8,92 @@ from typing import List, Optional, Sequence, Union
 class Operand:
     pass
 
+
 @dataclass(frozen=True)
 class Temp(Operand):
-    name: str                  
+    name: str
     type_hint: Optional[str] = None
+
 
 @dataclass(frozen=True)
 class Name(Operand):
-    name: str                 
+    name: str
     type_hint: Optional[str] = None
+    # Nuevo: marca si este nombre se refiere a una variable global
+    is_global: bool = False
 
 @dataclass(frozen=True)
 class Const(Operand):
     value: Union[int, float, str, bool, None]
     type_hint: Optional[str] = None
 
+
 @dataclass(frozen=True)
 class Label(Operand):
-    name: str                  
+    name: str
 
 
 @dataclass
 class Instr:
     pass
 
+
 @dataclass
 class LabelInstr(Instr):
-    label: Label               
+    label: Label
+
 
 @dataclass
 class Assign(Instr):
-    dst: Operand               
-    src: Operand               
+    dst: Operand
+    src: Operand
+
 
 @dataclass
 class UnaryOp(Instr):
     dst: Operand
-    op: str                    
+    op: str
     value: Operand
+
 
 @dataclass
 class BinOp(Instr):
     dst: Operand
-    op: str                   
+    op: str
     left: Operand
     right: Operand
 
+
 @dataclass
 class IfGoto(Instr):
-    cond: Operand             
+    cond: Operand
     target: Label
+
 
 @dataclass
 class Goto(Instr):
     target: Label
 
+
 @dataclass
 class Call(Instr):
-    dst: Optional[Operand]    
-    func: str                 
+    dst: Optional[Operand]
+    func: str
     args: List[Operand] = field(default_factory=list)
+
 
 @dataclass
 class Return(Instr):
     value: Optional[Operand] = None
 
+
 # Arrays
 @dataclass
 class Load(Instr):
     dst: Operand
-    array: Operand             
-    index: Operand             
+    array: Operand
+    index: Operand
+
 
 @dataclass
 class Store(Instr):
@@ -86,11 +101,13 @@ class Store(Instr):
     index: Operand
     value: Operand
 
+
 @dataclass
 class GetProp(Instr):
     dst: Operand
     obj: Operand
     prop: str
+
 
 @dataclass
 class SetProp(Instr):
@@ -98,11 +115,13 @@ class SetProp(Instr):
     prop: str
     value: Operand
 
+
 @dataclass
 class NewObject(Instr):
     dst: Operand
     class_name: str
     args: List[Operand] = field(default_factory=list)
+
 
 @dataclass
 class BasicBlock:
@@ -111,6 +130,7 @@ class BasicBlock:
 
     def add(self, instr: Instr) -> None:
         self.instrs.append(instr)
+
 
 @dataclass
 class Function:
@@ -130,18 +150,23 @@ class Function:
             self.new_block(Label("L0"))
         return self.blocks[0]
 
+
 @dataclass
 class Program:
     functions: List[Function] = field(default_factory=list)
+    # Nuevo: opcional, para registrar nombres globales a nivel de programa
+    global_vars: set[str] = field(default_factory=set)
 
     def add_function(self, fn: Function) -> None:
         self.functions.append(fn)
+
 
 @dataclass
 class MakeClosure(Instr):
     dst: Operand                      # Temp|Name
     code: Union[Label, str]           # etiqueta del codeptr
     captures: List[Operand] = field(default_factory=list)
+
 
 @dataclass
 class CallClosure(Instr):

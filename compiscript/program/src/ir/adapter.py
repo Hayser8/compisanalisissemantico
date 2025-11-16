@@ -7,7 +7,8 @@ from .model import Program
 from .context import IRGenContext
 from .temps import TempAllocator, LabelAllocator
 from .gen_stmt import gen_stmt
-from src.runtime.frame import FrameLayout  # <-- NUEVO
+from .annotate_globals import annotate_globals   # <-- NUEVO
+from src.runtime.frame import FrameLayout        # <-- ya existente
 
 # Tipos de las “tuplas” que ya usan gen_expr/gen_stmt
 Expr = Tuple[Any, ...]
@@ -23,12 +24,16 @@ class IRAdapter:
     """
     program: Program
     ctx: IRGenContext
-    frames: Dict[str, FrameLayout] = field(default_factory=dict)   # <-- NUEVO
+    frames: Dict[str, FrameLayout] = field(default_factory=dict)
 
     @classmethod
     def new(cls) -> IRAdapter:
         prog = Program()
-        ctx = IRGenContext(program=prog, temp_alloc=TempAllocator(), label_alloc=LabelAllocator())
+        ctx = IRGenContext(
+            program=prog,
+            temp_alloc=TempAllocator(),
+            label_alloc=LabelAllocator(),
+        )
         return cls(program=prog, ctx=ctx)
 
     def emit_function(
@@ -37,7 +42,7 @@ class IRAdapter:
         params: List[str],
         body: Stmt | Tuple[str, List[Stmt]],
         *,
-        locals: Optional[List[str]] = None,   # <-- NUEVO: lista de locales (opc.)
+        locals: Optional[List[str]] = None,
     ) -> None:
         """
         Crea una función y emite el cuerpo ya en forma de tuplas Stmt.
@@ -62,7 +67,7 @@ class IRAdapter:
             self.frames[name] = fl
 
         # 2) Emitir IR
-        # >>> IMPORTANTE: reiniciar allocators por función (evita "memory leak" entre contextos)
+        # Reiniciar allocators por función para no “arrastrar” temps/labels
         self.ctx.temp_alloc.reset()
         self.ctx.label_alloc.reset()
 
@@ -72,15 +77,30 @@ class IRAdapter:
         else:
             gen_stmt(('block', body if isinstance(body, list) else [body]), self.ctx)
         self.ctx.end_function()
-        # (Opcional) podrías usar self.frames[name].frame_size_bytes() para prolog/epilog en ASM.
+        # (Opcional) self.frames[name].frame_size_bytes() te sirve luego en el backend MIPS
+
+    def finalize(self) -> None:
+        """
+        Paso final sobre el IR completo:
+        - Detecta variables globales.
+        - Marca Name(..., is_global=True) donde corresponda.
+        - Llena program.global_vars.
         
+        Útil si usas IRAdapter directamente en tu compilador principal.
+        """
+        annotate_globals(self.program)
+
 
 def lower_program(functions: List[Tuple[str, List[str], Stmt]]) -> Program:
     """
     Helper para tests: recibe una lista de (name, params, body_stmt_en_tuplas)
-    y devuelve el Program con el IR completito.
+    y devuelve el Program con el IR completito + anotaciones de globales.
     """
     adapter = IRAdapter.new()
     for name, params, body in functions:
         adapter.emit_function(name, params, body)
+
+    # 🔥 Aquí marcamos globales (xs, ys, d1, d2, grid, pack, FINAL, etc.)
+    annotate_globals(adapter.program)
+
     return adapter.program

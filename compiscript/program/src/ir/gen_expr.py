@@ -37,10 +37,17 @@ def _as_operand(node: Expr | Operand, ctx: IRGenContext) -> Operand:
 
     # A partir de aquí esperamos tuplas ('tag', ...)
     tag = node[0]
+    # Usamos global_names si el contexto lo trae, sino un set vacío
+    global_names = getattr(ctx, "global_names", set())
+
     if tag == 'const':
         return Const(node[1])
     if tag == 'name':
-        return Name(node[1])
+        ident = node[1]
+        return Name(
+            name=ident,
+            is_global=ident in global_names
+        )
     # Para otros, se delega a gen_expr (que emitirá TAC)
     return gen_expr(node, ctx)
 
@@ -48,11 +55,18 @@ def _as_operand(node: Expr | Operand, ctx: IRGenContext) -> Operand:
 def gen_expr(node: Expr, ctx: IRGenContext) -> Operand:
     tag = node[0]
 
+    # Usamos global_names si está disponible en el contexto
+    global_names = getattr(ctx, "global_names", set())
+
     # Literales y nombres
     if tag == 'const':
         return Const(node[1])
     if tag == 'name':
-        return Name(node[1])
+        ident = node[1]
+        return Name(
+            name=ident,
+            is_global=ident in global_names
+        )
 
     # unario: ('un', op, expr)
     if tag == 'un':

@@ -132,12 +132,31 @@ class RegAlloc:
         # Offset negativo resultante
         return -(base_bytes + new_used)
 
+    # --------- Global vs local para Names ---------
+
+    def _is_global_name(self, nm: Name) -> bool:
+        """
+        Determina si un Name representa una variable global.
+
+        Por ahora usamos la marca que debe haber dejado annotate_globals:
+          - nm.is_global == True (si existe el atributo).
+        """
+        # Si por cualquier razón nm no es Name, devolvemos False por seguridad.
+        if not isinstance(nm, Name):
+            return False
+        return bool(getattr(nm, "is_global", False))
+
     def _home_offset_of_name(self, nm: Name) -> Optional[int]:
         """
         Devuelve el offset negativo donde vive 'nm' en el frame, si tiene "home".
 
         Se busca primero en locales, luego entre parámetros con home.
+        Para nombres marcados como globales, siempre devuelve None (no tienen home en frame).
         """
+        # Globales: nunca viven en el frame
+        if self._is_global_name(nm):
+            return None
+
         # Local
         local_off = getattr(self.plan, "local_off", {})
         if nm.name in local_off:
@@ -263,11 +282,12 @@ class RegAlloc:
                 off = self._home_offset_of_name(op)
                 if off is None:
                     # Si no tiene home estático, darle un spill slot dedicado
-                    if op.name not in self.temp_spill_off:
+                    if op.name not in self.temp_spill_off and not self._is_global_name(op):
                         self.temp_spill_off[op.name] = self._alloc_spill_slot()
-                    off = self.temp_spill_off[op.name]
-                # Carga desde su home (último valor persistente) al $s*
-                asm_lw_fp(out, sreg, off)
+                    off = self.temp_spill_off.get(op.name)
+                if off is not None:
+                    # Carga desde su home (último valor persistente) al $s*
+                    asm_lw_fp(out, sreg, off)
                 self.reg_owner[sreg] = f"name:{op.name}"
                 # No lo añadimos a temp_in_reg: es "name"
                 return sreg, True
@@ -276,14 +296,16 @@ class RegAlloc:
             reg = self._acquire_t()
             off = self._home_offset_of_name(op)
             if off is None:
-                # Name sin home estático -> spill dedicado
-                if op.name not in self.temp_spill_off:
+                # Name sin home estático -> spill dedicado (solo si no es global)
+                if op.name not in self.temp_spill_off and not self._is_global_name(op):
                     self.temp_spill_off[op.name] = self._alloc_spill_slot()
-                off = self.temp_spill_off[op.name]
-            asm_lw_fp(out, reg, off)
+                off = self.temp_spill_off.get(op.name)
+            if off is not None:
+                asm_lw_fp(out, reg, off)
             self.reg_owner[reg] = f"name:{op.name}"
             # Lo tratamos igual que un temp a nivel de spills
-            self.temp_in_reg[op.name] = reg
+            if not self._is_global_name(op):
+                self.temp_in_reg[op.name] = reg
             return reg, True
 
         # ------------ Const ------------
@@ -307,6 +329,11 @@ class RegAlloc:
         from src.ir.model import Name as _Name
 
         if isinstance(op, _Name):
+            # Globales: no se guardan en el frame; la lógica de Store/Load
+            # de globales debe generar sw/lw usando la etiqueta en .data.
+            if self._is_global_name(op):
+                return
+
             off = self._home_offset_of_name(op)
             if off is None:
                 # Name sin home estático -> usar/crear spill dedicado

@@ -2,6 +2,9 @@
 import sys, json, argparse, os, subprocess, tempfile
 from typing import Any, Dict, List, Tuple, Optional
 
+from src.ir.annotate_globals import annotate_globals
+from src.ir.debug_global import debug_dump_globals
+
 # ---- Fase de parseo (tu helper existente) ----
 from src.frontend.parser_util import parse_code
 
@@ -30,38 +33,9 @@ from src.ir.model import (
 
 # ---- Backend MIPS ----
 from src.backend.mips.emitter import emit_full_program
+from src.backend.mips.data import StringPool, GlobalsTable
 
 WORD = 4  # tamaño de palabra en MIPS
-
-# ============================================================
-# Stubs para pool de constantes y tabla de direcciones globales
-# ============================================================
-
-class GlobalConstPool:
-    def __init__(self) -> None:
-        # Mapa label -> string (lo que usa el emitter para .asciiz)
-        self._strings: Dict[str, str] = {}
-        self._str_counter: int = 0
-
-    def get_label_for(self, text: str) -> str:
-        """
-        Devuelve un label estable para el literal de texto dado.
-        Reutiliza labels si el string ya fue visto.
-        """
-        for lab, s in self._strings.items():
-            if s == text:
-                return lab
-        lab = f"__str_{self._str_counter}"
-        self._str_counter += 1
-        self._strings[lab] = text
-        return lab
-
-
-class GlobalAddrTable:
-    def __init__(self) -> None:
-        # Puede contener mapas nombreGlobal->valor
-        self._globals: Dict[str, int] = {}
-
 
 # ============================================================
 # Utilidades
@@ -153,6 +127,9 @@ def analyze_source(source: str):
 
 
 def build_ir_from_tree(tree) -> str:
+    """
+    Versión usada sólo para el modo --json (no necesitamos annotate aquí).
+    """
     ast = ASTBuilder().visit(tree)
     fn_tuples = ast_lower_to_tuples(ast)
     adapter = IRAdapter.new()
@@ -282,7 +259,12 @@ def _infer_obj_types(prog: Program) -> Dict[str, str]:
     while changed:
         changed = False
         for fn in prog.functions:
-            for ins in fn.body:
+            # OJO: tu Function usa .blocks; aquí asumimos que ya está adaptado
+            instrs: List[Instr] = []
+            for bb in getattr(fn, "blocks", []):
+                instrs.extend(bb.instrs)
+
+            for ins in instrs:
                 if isinstance(ins, NewObject):
                     k = _key_of(ins.dst)
                     if k and k not in types:
@@ -318,7 +300,7 @@ class SimpleFramePlan:
         # En tu IR los params suelen ser strings; normalizamos a lista de nombres
         self.param_names: List[Any] = list(getattr(fn, "params", []))
 
-        self.need_param_homes = len(param_home_off)
+        self.need_param_homes: int = len(param_home_off)
 
         self.s_regs_in_use: List[str] = []
 
@@ -366,23 +348,32 @@ def _plan_for(fn: Function) -> SimpleFramePlan:
     return SimpleFramePlan(fn, frame_size, local_offsets, param_homes)
 
 
-
 # ============================================================
 # Emisión de ASM MIPS (inyectando layouts + obj_types)
 # ============================================================
 
 def emit_mips_asm(prog: Program, layouts=None) -> str:
-    pool = GlobalConstPool()
-    gtab = GlobalAddrTable()
+    # Pool real de strings (.asciiz) y tabla real de globales (.word)
+    pool = StringPool()
+    gtab = GlobalsTable()
 
+    # Registrar globales descubiertas por annotate_globals
+    for name in getattr(prog, "global_vars", set()):
+        # Por ahora, todas como .word 0 (scalar de 4 bytes)
+        gtab.define_word(name, 0)
+
+    # Layouts para objetos (si no te pasaron uno)
     if layouts is None:
         layouts = SimpleLayoutRegistry(field_offsets={}, obj_sizes={})
+
+    # Inferencia aprox de tipos de objeto (para GetProp/SetProp)
     try:
         obj_types = _infer_obj_types(prog)
     except Exception:
         obj_types = {}
     setattr(layouts, "obj_types", obj_types)
 
+    # Emitir el programa MIPS completo
     asm = emit_full_program(
         prog,
         pool=pool,
@@ -401,8 +392,10 @@ def _find_mars_jar() -> Optional[str]:
     env = os.environ.get("MARS_JAR")
     if env and os.path.exists(env):
         return env
-    for p in ["src/tools/Mars4_5.jar","/mars/Mars.jar", "/opt/mars/Mars.jar", "/opt/Mars.jar",
-              "/tools/Mars.jar", "Mars.jar", "Mars4_5.jar"]:
+    for p in [
+        "src/tools/Mars4_5.jar", "/mars/Mars.jar", "/opt/mars/Mars.jar",
+        "/opt/Mars.jar", "/tools/Mars.jar", "Mars.jar", "Mars4_5.jar"
+    ]:
         if os.path.exists(p):
             return p
     return None
@@ -436,7 +429,6 @@ def run_in_mars(asm_text: str) -> int:
         return 0
 
     # 4) Ejecutar MARS sobre el ASM
-    # Si quieres forzar modo solo consola, prueba: ["java", "-jar", mars, "nc", asm_path]
     cmd = ["java", "-jar", mars, asm_path]
     print(f"[MARS] Ejecutando: {' '.join(cmd)}")
 
@@ -499,17 +491,7 @@ def main():
     if args.symbols:
         print(json.dumps(_serialize_symbols(dc), ensure_ascii=False, indent=2))
 
-    # IR pretty opcional
-    if args.emit_ir:
-        try:
-            pretty_ir = build_ir_from_tree(tree)
-            print("\n--- IR (TAC) ---")
-            print(pretty_ir)
-        except Exception as ex:
-            print(f"[IR] Error generando IR: {ex}")
-            sys.exit(1)
-
-    # Lowering a IR objeto
+    # === Lowering a IR objeto (UNA sola vez) ===
     try:
         ast = ASTBuilder().visit(tree)
         fn_tuples = ast_lower_to_tuples(ast)
@@ -521,10 +503,26 @@ def main():
         print(f"[IR] Error en lowering/adapter: {ex}")
         sys.exit(1)
 
-    # Layouts desde símbolos
+    # === Anotar globales en el IR ===
+    try:
+        annotate_globals(prog)
+    except Exception as ex:
+        print(f"[IR] WARN: annotate_program falló: {ex}")
+
+    # === IR pretty + debug de globales si se pide --emit-ir ===
+    if args.emit_ir:
+        try:
+            debug_dump_globals(prog)
+        except Exception as ex:
+            print(f"[DEBUG] Error en debug_dump_globals: {ex}")
+        print("\n--- IR (TAC) ---")
+        print(ir_to_str(prog))
+
+    # === Layouts desde símbolos ===
     layouts = _build_layouts_from_dc(dc)
     layouts.build_all()
 
+    # === ASM MIPS / MARS ===
     if args.emit_mips or args.run_mars:
         try:
             asm_text = emit_mips_asm(prog, layouts=layouts)
