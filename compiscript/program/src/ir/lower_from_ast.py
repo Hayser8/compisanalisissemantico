@@ -1,12 +1,14 @@
 # program/src/ir/lower_from_ast.py
 from __future__ import annotations
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple, Optional, Any, Set
 import sys
 
 from src.ast import nodes as A
 
 ExprT = Tuple[Any, ...]
 StmtT = Tuple[Any, ...]
+
+_STRING_VARS: Set[str] = set()  # <- NUEVO
 
 
 _gensym_counter = 0
@@ -160,10 +162,33 @@ def lower_stmt(s: A.Stmt) -> StmtT:
 
     # print expr -> call print(expr)
     if isinstance(s, A.PrintStmt):
-        return ('expr', ('call', 'print', [lower_expr(s.expr)]))
+        expr = s.expr
+        ir_expr = lower_expr(expr)
+
+        # 1) literal de string directo: print("hola")
+        if isinstance(expr, A.StringLiteral):
+            return ('expr', ('call', 'print_str', [ir_expr]))
+
+        # 2) variable que sabemos que es string por su declaración
+        if isinstance(expr, A.Identifier) and expr.name in _STRING_VARS:
+            return ('expr', ('call', 'print_str', [ir_expr]))
+
+        # 3) TODO futuro: usar expr.inferred_type si algún día lo llenamos
+        t = getattr(expr, "inferred_type", None)
+        if t == "string":
+            return ('expr', ('call', 'print_str', [ir_expr]))
+        if t in ("integer", "float", "boolean"):
+            return ('expr', ('call', 'print_int', [ir_expr]))
+
+        # 4) Fallback: lo tratamos como entero
+        return ('expr', ('call', 'print_int', [ir_expr]))
 
     # Declaraciones (var/const) -> si hay init, simplemente asignamos name = init
     if isinstance(s, A.VarDecl):
+        # 👇 Nuevo: registrar variables de tipo string
+        if s.type_ann == "string":
+            _STRING_VARS.add(s.name)
+
         if s.init is None:
             return ('block', [])
         return ('assign', ('name', s.name), lower_expr(s.init))
@@ -408,6 +433,8 @@ def lower_program(prog: A.Program) -> List[Tuple[str, List[str], StmtT]]:
     Toma el AST Program y devuelve [(fn_name, params, body_stmt), ...]
     con funciones top-level y métodos de clase.
     """
+    global _STRING_VARS
+    _STRING_VARS.clear()
     functions: List[Tuple[str, List[str], StmtT]] = []
 
     for st in prog.statements:

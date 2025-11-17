@@ -34,6 +34,53 @@ def _emit_simple_stub(name: str) -> str:
     IMPORTANTE: el epílogo incluye un 'nop' en el delay slot
     del 'beq $ra, $zero, __cps_halt' para evitar saltar a 0x0.
     """
+    if name == "print_int":
+        return f"""print_int:
+  addiu $sp, $sp, -16
+  sw $fp, 0($sp)
+  sw $ra, 4($sp)
+  addiu $fp, $sp, 16
+
+  li $v0, 1       # print_int
+  syscall
+
+  li $v0, 11      # print_char
+  li $a0, 10      # '\\n'
+  syscall
+
+print_int__epilogue:
+  lw $fp, 0($sp)
+  lw $ra, 4($sp)
+  addiu $sp, $sp, 16
+  beq $ra, $zero, __cps_halt
+  nop
+  jr $ra
+"""
+
+    if name == "print_str":
+        return f"""print_str:
+  addiu $sp, $sp, -16
+  sw $fp, 0($sp)
+  sw $ra, 4($sp)
+  addiu $fp, $sp, 16
+
+  li $v0, 4       # print_string
+  syscall
+
+  li $v0, 11      # print_char
+  li $a0, 10      # '\\n'
+  syscall
+
+print_str__epilogue:
+  lw $fp, 0($sp)
+  lw $ra, 4($sp)
+  addiu $sp, $sp, 16
+  beq $ra, $zero, __cps_halt
+  nop
+  jr $ra
+"""
+
+    # 🔁 Resto de funciones desconocidas: stub genérico como antes
     return f"""{name}:
   # Auto-generated stub: returns its first argument (a0) unchanged
   addiu $sp, $sp, -16
