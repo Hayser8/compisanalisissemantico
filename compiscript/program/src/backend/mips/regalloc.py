@@ -43,6 +43,9 @@ class RegAlloc:
     name_pins: Dict[str, str] = field(default_factory=dict)
     s_regs_in_use: List[str] = field(default_factory=list)
 
+    # set de nombres globales (labels en .data); lo rellena el emitter
+    global_names: set[str] = field(default_factory=set)
+
     # -------------------------------------------------
     # Normalización del plan (hacerlo "frame-plan-like")
     # -------------------------------------------------
@@ -80,6 +83,10 @@ class RegAlloc:
         # Contador interno de spills ya usados
         if not hasattr(self.plan, "_spill_used_bytes"):
             self.plan._spill_used_bytes = 0
+
+        # Si por alguna razón el emitter no setea global_names, que exista como set vacío
+        if not hasattr(self, "global_names") or self.global_names is None:
+            self.global_names = set()
 
     # ---------------- Internos ----------------
 
@@ -134,10 +141,17 @@ class RegAlloc:
 
     def _home_offset_of_name(self, nm: Name) -> Optional[int]:
         """
-        Devuelve el offset negativo donde vive 'nm' en el frame, si tiene "home".
+        Devuelve el offset NEGATIVO donde vive 'nm' en el frame, si tiene "home".
 
         Se busca primero en locales, luego entre parámetros con home.
+
+        Importante: si 'nm' es un global (label en .data) se devuelve None
+        para que se trate como variable global y NO como algo en el frame.
         """
+        # Globals nunca tienen home en frame
+        if nm.name in self.global_names:
+            return None
+
         # Local
         local_off = getattr(self.plan, "local_off", {})
         if nm.name in local_off:
@@ -163,6 +177,10 @@ class RegAlloc:
         """
         Intenta asignar en orden cada name (string) a $s0..$s7.
         No toca los Names no listados (seguirán usando $t*).
+
+        El emitter ya filtra para no pinnear nombres globales, pero aquí
+        podríamos encontrarlos por accidente, así que es buena idea respetar
+        self.global_names desde afuera (el caller).
         """
         used: List[str] = []
         i = 0
@@ -170,6 +188,9 @@ class RegAlloc:
             if nm in self.name_pins:
                 sreg = self.name_pins[nm]
                 used.append(sreg)
+                continue
+            if nm in self.global_names:
+                # No tiene sentido pinnear globals en $s*: viven en .data
                 continue
             if i >= len(POOL_S):
                 break
@@ -213,6 +234,10 @@ class RegAlloc:
         """
         Spillea TODOS los Temp/Name que actualmente viven en un $t*.
         Emite comentario 'caller-save spill <temp|name>'.
+
+        Ojo: si por alguna razón hay globals en temp_in_reg, se van a
+        spill-ear a slots del frame, pero ensure_in_reg para globals siempre
+        recarga desde .data, así que esos spills solo son redundantes (no rompen semántica).
         """
         for tname, reg in list(self.temp_in_reg.items()):
             if tname not in self.temp_spill_off:
@@ -257,6 +282,18 @@ class RegAlloc:
 
         # ------------ Name ------------
         if isinstance(op, _Name):
+            # Caso especial: nombres GLOBALes (labels en .data)
+            if op.name in self.global_names:
+                reg = self._acquire_t()
+                # Cargar directamente desde el label global
+                asm_comment(out, f"load global {op.name}")
+                out.append(f"  la $at, {op.name}")
+                out.append(f"  lw {reg}, 0($at)")
+                self.reg_owner[reg] = f"global:{op.name}"
+                # No lo metemos a temp_in_reg: si se pierde en una llamada,
+                # simplemente se recarga desde .data cuando se necesite.
+                return reg, True
+
             # ¿está pinneado a $s*?
             if op.name in self.name_pins:
                 sreg = self.name_pins[op.name]
@@ -269,7 +306,7 @@ class RegAlloc:
                 # Carga desde su home (último valor persistente) al $s*
                 asm_lw_fp(out, sreg, off)
                 self.reg_owner[sreg] = f"name:{op.name}"
-                # No lo añadimos a temp_in_reg: es "name"
+                # No lo añadimos a temp_in_reg: es "name" pinneado
                 return sreg, True
 
             # default: usa $t*
@@ -301,12 +338,19 @@ class RegAlloc:
 
     def store_to_home_if_name(self, op: Operand, src_reg: str, out: List[str]) -> None:
         """
-        Si `op` es Name, guarda src_reg en su home (local/param/spill).
-        Si no, no hace nada.
+        Si `op` es Name, guarda src_reg en su home (local/param/spill) o en .data
+        si es un global. Si no, no hace nada.
         """
         from src.ir.model import Name as _Name
 
         if isinstance(op, _Name):
+            # Globals -> escribir directamente a la etiqueta en .data
+            if op.name in self.global_names:
+                asm_comment(out, f"store global {op.name}")
+                out.append(f"  la $at, {op.name}")
+                out.append(f"  sw {src_reg}, 0($at)")
+                return
+
             off = self._home_offset_of_name(op)
             if off is None:
                 # Name sin home estático -> usar/crear spill dedicado

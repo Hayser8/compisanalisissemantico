@@ -1,21 +1,46 @@
 from __future__ import annotations
-from typing import List, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple
 
+
+@dataclass
 class StringPool:
     """
-    Pool mínimo para cadenas.
-    - add(texto) -> devuelve una etiqueta __str_N
-    - pairs() -> lista de tuplas (label, texto) que emit_full_program sabe leer
+    Pool de strings para el backend MIPS.
+
+    Características:
+      - Deduplica: el mismo texto siempre recibe la misma etiqueta __str_N.
+      - Orden estable: se guarda el orden de inserción para emitir .data determinista.
+      - API:
+          - ensure_label(texto) / get_label_for(texto) -> "__str_k"
+          - add(texto) -> alias de ensure_label (compatibilidad)
+          - pairs() -> lista de (label, texto), útil para tests u otras emisiones.
     """
-    def __init__(self) -> None:
-        self._pairs: List[Tuple[str, str]] = []
+    _map: Dict[str, str] = field(default_factory=dict)   # texto -> label
+    _order: List[str] = field(default_factory=list)      # textos en orden de inserción
 
+    def ensure_label(self, s: str) -> str:
+        """Devuelve un label estable para el string s (lo crea si no existe)."""
+        if s in self._map:
+            return self._map[s]
+        label = f"__str_{len(self._order)}"
+        self._map[s] = label
+        self._order.append(s)
+        return label
+
+    # Alias “oficial” que usan las plantillas para strings.
+    def get_label_for(self, s: str) -> str:
+        """Alias público de ensure_label, usado por templates._as_reg."""
+        return self.ensure_label(s)
+
+    # Alias de compatibilidad con la versión vieja de StringPool.
     def add(self, s: str) -> str:
-        lab = f"__str_{len(self._pairs)}"
-        self._pairs.append((lab, s))
-        return lab
+        """Alias de ensure_label para compatibilidad con código viejo."""
+        return self.ensure_label(s)
 
-    # emit_full_program usa _iter_string_pool_pairs que intenta
-    # llamar métodos sin args que devuelvan lista de (label, texto).
     def pairs(self) -> List[Tuple[str, str]]:
-        return list(self._pairs)
+        """
+        Devuelve [(label, texto), ...] en orden de inserción.
+        Útil si en otro lado quieres iterar explícitamente el pool.
+        """
+        return [(self._map[s], s) for s in self._order]

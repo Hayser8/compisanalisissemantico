@@ -1,6 +1,7 @@
 # program/src/ir/lower_from_ast.py
 from __future__ import annotations
 from typing import List, Tuple, Optional, Any
+import sys
 
 from src.ast import nodes as A
 
@@ -31,7 +32,7 @@ def lower_expr(e: Optional[A.Expr]) -> Optional[ExprT]:
     if isinstance(e, A.NullLiteral):
         return ('const', None)
 
-    # >>> Arrays declarativos (en lugar de ('call','__array__', ...))
+    # Arrays declarativos
     if isinstance(e, A.ArrayLiteral):
         elems = [lower_expr(x) for x in e.elements]
         return ('array', elems)
@@ -72,9 +73,37 @@ def lower_expr(e: Optional[A.Expr]) -> Optional[ExprT]:
     if isinstance(e, A.UnaryOp):
         return ('un', e.op, lower_expr(e.expr))
 
-    # Binario
+    # 🚨 Binario: aquí metemos la lógica especial de strings
     if isinstance(e, A.BinaryOp):
-        return ('bin', e.op, lower_expr(e.left), lower_expr(e.right))
+        left = e.left
+        right = e.right
+
+        left_is_str = isinstance(left, A.StringLiteral)
+        right_is_str = isinstance(right, A.StringLiteral)
+
+        # 1) Concatenación de strings: algo + "texto" o "texto" + algo
+        if e.op == '+' and (left_is_str or right_is_str):
+            return (
+                'call',
+                '__str_concat',
+                [lower_expr(left), lower_expr(right)],
+            )
+
+        # 2) Comparación de strings con literal: algo == "texto" o "texto" == algo
+        if e.op in ('==', '!=') and (left_is_str or right_is_str):
+            eq_expr: ExprT = (
+                'call',
+                '__str_eq',
+                [lower_expr(left), lower_expr(right)],
+            )
+            if e.op == '==':
+                return eq_expr
+            else:
+                # '!=' -> negamos el resultado de __str_eq
+                return ('un', '!', eq_expr)
+
+        # 3) Caso general: numérico / booleano / lo que sea
+        return ('bin', e.op, lower_expr(left), lower_expr(right))
 
     # Ternario
     if isinstance(e, A.TernaryOp):
@@ -95,11 +124,14 @@ def lower_expr(e: Optional[A.Expr]) -> Optional[ExprT]:
     raise ValueError(f"lower_expr no soportada: {type(e).__name__}")
 
 
+
 def lower_block(b: A.Block) -> StmtT:
     return ('block', [lower_stmt(s) for s in b.statements])
 
+
 def _lower_stmt_list(stmts: List[A.Stmt]) -> StmtT:
     return ('block', [lower_stmt(s) for s in stmts])
+
 
 def lower_stmt(s: A.Stmt) -> StmtT:
     # Bloque
@@ -201,7 +233,7 @@ def lower_stmt(s: A.Stmt) -> StmtT:
             return ('return',)
         return ('return', lower_expr(s.value))
 
-    # -------- FOREACH (nuevo) --------
+    # -------- FOREACH --------
     if isinstance(s, A.ForeachStmt):
         # foreach (v in iterable) body
         # Desazucarado:
@@ -222,19 +254,29 @@ def lower_stmt(s: A.Stmt) -> StmtT:
 
         # cuerpo del while: [ v = arr[i], (stmts...), i = i + 1 ]
         body_stmts: List[StmtT] = []
-        body_stmts.append(('assign', ('name', s.var_name), ('index', ('name', arr_tmp), ('name', i_tmp))))
+        body_stmts.append(
+            ('assign',
+             ('name', s.var_name),
+             ('index', ('name', arr_tmp), ('name', i_tmp)))
+        )
         if isinstance(body_lowered, tuple) and body_lowered and body_lowered[0] == 'block':
             body_stmts.extend(body_lowered[1])  # inyectar sentencias reales
         else:
             body_stmts.append(body_lowered)
-        body_stmts.append(('assign', ('name', i_tmp), ('bin', '+', ('name', i_tmp), ('const', 1))))
+        body_stmts.append(
+            ('assign',
+             ('name', i_tmp),
+             ('bin', '+', ('name', i_tmp), ('const', 1)))
+        )
 
         # bloque completo
         return ('block', [
             ('assign', ('name', arr_tmp), lowered_iter),
             ('assign', ('name', len_tmp), ('call', '__len__', [('name', arr_tmp)])),
             ('assign', ('name', i_tmp), ('const', 0)),
-            ('while', ('bin', '<', ('name', i_tmp), ('name', len_tmp)), ('block', body_stmts)),
+            ('while',
+             ('bin', '<', ('name', i_tmp), ('name', len_tmp)),
+             ('block', body_stmts)),
         ])
 
     # try/catch: pendiente
@@ -245,17 +287,28 @@ def lower_stmt(s: A.Stmt) -> StmtT:
     raise ValueError(f"lower_stmt no soportada: {type(s).__name__}")
 
 
-def lower_function_decl(fn: A.FunctionDecl, *, owner_class: Optional[str] = None) -> Tuple[str, List[str], StmtT]:
+def lower_function_decl(
+    fn: A.FunctionDecl,
+    *,
+    owner_class: Optional[str] = None
+) -> Tuple[str, List[str], StmtT]:
     """
     Devuelve una tupla (name, params, body_stmt) lista para IRAdapter.emit_function.
-    - owner_class: si no es None, nombra la función como 'Clase::metodo'.
+    - owner_class: si no es None, nombra la función como 'Clase::metodo'
+      y agrega un parámetro implícito 'this' al inicio.
     """
     name = fn.name
-    if owner_class:
-        name = f"{owner_class}::{name}"
     params = [p.name for p in fn.params]
+
+    if owner_class is not None:
+        # Nombre calificado de método / ctor
+        name = f"{owner_class}::{name}"
+        # Parámetro implícito para el receptor
+        params = ["this"] + params
+
     body = lower_block(fn.body)
     return (name, params, body)
+
 
 def lower_class_decl(cd: A.ClassDecl) -> List[Tuple[str, List[str], StmtT]]:
     """
@@ -267,6 +320,88 @@ def lower_class_decl(cd: A.ClassDecl) -> List[Tuple[str, List[str], StmtT]]:
         if isinstance(m.member, A.FunctionDecl):
             out.append(lower_function_decl(m.member, owner_class=cd.name))
     return out
+
+
+# =========================
+#   HELPERS DE DEBUG IR
+# =========================
+
+def _collect_calls_in_expr(e: Optional[ExprT], target: str, out: List[ExprT]) -> None:
+    if e is None or not isinstance(e, tuple):
+        return
+    tag = e[0]
+    if tag == 'call':
+        fname = e[1]
+        args = e[2] if len(e) > 2 else []
+        if fname == target:
+            out.append(e)
+        for a in args:
+            _collect_calls_in_expr(a, target, out)
+    elif tag == 'un':
+        _collect_calls_in_expr(e[2], target, out)
+    elif tag == 'bin':
+        _collect_calls_in_expr(e[2], target, out)
+        _collect_calls_in_expr(e[3], target, out)
+    elif tag == 'tern':
+        _collect_calls_in_expr(e[1], target, out)
+        _collect_calls_in_expr(e[2], target, out)
+        _collect_calls_in_expr(e[3], target, out)
+    elif tag in ('prop', 'index'):
+        for x in e[1:]:
+            _collect_calls_in_expr(x, target, out)
+    elif tag == 'array':
+        for el in e[1]:
+            _collect_calls_in_expr(el, target, out)
+    # 'name', 'const', etc. no tienen hijos interesantes aquí.
+
+
+def _collect_calls_in_stmt(s: StmtT, target: str, out: List[ExprT]) -> None:
+    if not isinstance(s, tuple):
+        return
+    tag = s[0]
+    if tag == 'block':
+        for st in s[1]:
+            _collect_calls_in_stmt(st, target, out)
+    elif tag == 'expr':
+        _collect_calls_in_expr(s[1], target, out)
+    elif tag == 'assign':
+        # RHS puede contener llamadas
+        _collect_calls_in_expr(s[2], target, out)
+    elif tag == 'if':
+        _collect_calls_in_expr(s[1], target, out)
+        _collect_calls_in_stmt(s[2], target, out)
+        if s[3] is not None:
+            _collect_calls_in_stmt(s[3], target, out)
+    elif tag == 'while':
+        _collect_calls_in_expr(s[1], target, out)
+        _collect_calls_in_stmt(s[2], target, out)
+    elif tag == 'do_while':
+        _collect_calls_in_stmt(s[1], target, out)
+        _collect_calls_in_expr(s[2], target, out)
+    elif tag == 'for':
+        init_stmt, cond_expr, step_stmt, body_b = s[1], s[2], s[3], s[4]
+        if init_stmt is not None:
+            _collect_calls_in_stmt(init_stmt, target, out)
+        if cond_expr is not None:
+            _collect_calls_in_expr(cond_expr, target, out)
+        if step_stmt is not None:
+            _collect_calls_in_stmt(step_stmt, target, out)
+        _collect_calls_in_stmt(body_b, target, out)
+    elif tag == 'switch':
+        _collect_calls_in_expr(s[1], target, out)
+        for case_expr, case_block in s[2]:
+            _collect_calls_in_expr(case_expr, target, out)
+            _collect_calls_in_stmt(case_block, target, out)
+        if s[3] is not None:
+            _collect_calls_in_stmt(s[3], target, out)
+    elif tag == 'return':
+        if len(s) > 1:
+            _collect_calls_in_expr(s[1], target, out)
+    # break/continue no contienen expresiones.
+
+
+_IR_DEBUG = True  # ponlo en False cuando ya no quieras ruido
+
 
 def lower_program(prog: A.Program) -> List[Tuple[str, List[str], StmtT]]:
     """
@@ -294,5 +429,25 @@ def lower_program(prog: A.Program) -> List[Tuple[str, List[str], StmtT]]:
     if loose:
         body = ('block', [lower_stmt(s) for s in loose])
         functions.append(("main", [], body))
+
+    # =============== MINI-DEBUG: pokeArray y runAll =================
+    if _IR_DEBUG:
+        by_name = {fn_name: (params, body) for (fn_name, params, body) in functions}
+
+        if "pokeArray" in by_name:
+            params, body = by_name["pokeArray"]
+            print(f"[IR-DBG] pokeArray params (lower_from_ast): {params}", file=sys.stdout)
+
+        if "runAll" in by_name:
+            params, body = by_name["runAll"]
+            calls: List[ExprT] = []
+            _collect_calls_in_stmt(body, "pokeArray", calls)
+            print("[IR-DBG] runAll -> pokeArray calls (lower_from_ast):", file=sys.stdout)
+            if not calls:
+                print("  [IR-DBG]   <sin llamadas a pokeArray encontradas>", file=sys.stdout)
+            else:
+                for c in calls:
+                    print(f"  [IR-DBG]   {c}", file=sys.stdout)
+    # ================================================================
 
     return functions

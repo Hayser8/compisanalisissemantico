@@ -176,6 +176,7 @@ def _as_reg(val, ra, out: List[str], *, const_slot: int = 1, pool=None) -> str:
     Para Const de tipo string no numérica:
       - Usa `pool.get_label_for(text)` para obtener un label __str_n
       - Emite `la R_K*, label`
+      - Si no hay pool (bug de wiring), lanza RuntimeError.
     """
     if isinstance(val, Const):
         v = val.value
@@ -187,14 +188,15 @@ def _as_reg(val, ra, out: List[str], *, const_slot: int = 1, pool=None) -> str:
             try:
                 _emit_li_num(out, reg, v, ra=ra)
             except ValueError:
-                if pool is not None and hasattr(pool, "get_label_for"):
-                    label = pool.get_label_for(v)
-                    out.append(f"  la {reg}, {label}")
-                else:
-                    # Fallback ultra-defensivo si no hay pool
-                    out.append(
-                        f"  li {reg}, 0  # WARN: const string {v!r} sin pool; usando 0"
+                # Aquí ya sabemos que es un string "real", no numérico.
+                if pool is None or not hasattr(pool, "get_label_for"):
+                    raise RuntimeError(
+                        f"Const string {v!r} sin StringPool.get_label_for configurado. "
+                        "Asegúrate de pasar la misma instancia de StringPool al emitter "
+                        "como 'pool' y como 'const_pool'."
                     )
+                label = pool.get_label_for(v)
+                out.append(f"  la {reg}, {label}")
             return reg
 
         # No string: usar _emit_li_num normal
@@ -206,6 +208,7 @@ def _as_reg(val, ra, out: List[str], *, const_slot: int = 1, pool=None) -> str:
     if isinstance(val, Temp):
         return _reg_for_temp(ra, val)
     raise TypeError(f"Valor no soportado: {val!r}")
+
 
 
 def _store_into_dest(dst, src_reg: str, ra, out: List[str]) -> None:
@@ -428,24 +431,30 @@ def emit_for_instr(ins: Instr, ra, out: List[str], *, epilogue_label: str, **kwa
 
     # 7) Load  (array[idx])
     if isinstance(ins, Load):
-        rbase = ra.reg_for_read(ins.array, out)
-        ridx = ra.reg_for_read(ins.index, out)
+        # base e índice pasan por _as_reg para que Const usen K1/K2
+        rbase = _as_reg(ins.array, ra, out, const_slot=1, pool=const_pool)
+        ridx  = _as_reg(ins.index, ra, out, const_slot=2, pool=const_pool)
+
         out.append(f"  sll {R_SCR}, {ridx}, 2")
         out.append(f"  addu {R_SCR}, {rbase}, {R_SCR}")
         out.append(f"  lw {R_RES}, 0({R_SCR})")
         _store_into_dest(ins.dst, R_RES, ra, out)
         return
 
-    # 8) Store (array[idx] = value)
+     # 8) Store (array[idx] = value)
     if isinstance(ins, Store):
-        rbase = ra.reg_for_read(ins.array, out)
-        ridx = ra.reg_for_read(ins.index, out)
-        rval = _as_reg(ins.value, ra, out, pool=const_pool)
+        # Igual que en Load: base e índice via _as_reg
+        rbase = _as_reg(ins.array, ra, out, const_slot=1, pool=const_pool)
+        ridx  = _as_reg(ins.index, ra, out, const_slot=2, pool=const_pool)
+        # El valor también via _as_reg; si es Const y el índice también,
+        # índice usará K2 ($t5) y valor K1 ($t4)
+        rval  = _as_reg(ins.value, ra, out, const_slot=1, pool=const_pool)
+
         out.append(f"  sll {R_SCR}, {ridx}, 2")
         out.append(f"  addu {R_SCR}, {rbase}, {R_SCR}")
         out.append(f"  sw {rval}, 0({R_SCR})")
         return
-
+    
     # 9) Objetos
     if isinstance(ins, NewObject):
         if layouts is None:
@@ -467,7 +476,9 @@ def emit_for_instr(ins: Instr, ra, out: List[str], *, epilogue_label: str, **kwa
         elif isinstance(ins.obj, Temp) and ins.obj.name in obj_types:
             cls_name = obj_types[ins.obj.name]
         off = layouts.field_offset(ins.prop, class_name=cls_name)
-        rbase = ra.reg_for_read(ins.obj, out)
+
+        # usar _as_reg para soportar Name y Temp coherentemente
+        rbase = _as_reg(ins.obj, ra, out, pool=const_pool)
         out.append(f"  lw {R_RES}, {off}({rbase})")
         _store_into_dest(ins.dst, R_RES, ra, out)
         return
@@ -481,8 +492,9 @@ def emit_for_instr(ins: Instr, ra, out: List[str], *, epilogue_label: str, **kwa
         elif isinstance(ins.obj, Temp) and ins.obj.name in obj_types:
             cls_name = obj_types[ins.obj.name]
         off = layouts.field_offset(ins.prop, class_name=cls_name)
-        rbase = ra.reg_for_read(ins.obj, out)
-        rval = _as_reg(ins.value, ra, out, pool=const_pool)
+
+        rbase = _as_reg(ins.obj, ra, out, pool=const_pool)
+        rval  = _as_reg(ins.value, ra, out, pool=const_pool)
         out.append(f"  sw {rval}, {off}({rbase})")
         return
 

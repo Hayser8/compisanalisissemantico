@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, Iterable, Tuple
 from .symbols import Symbol
 
+
 @dataclass
 class Scope:
     """
@@ -19,14 +20,29 @@ class Scope:
 
     # Declaración local: False si ya existía en ESTE scope (prohibir redeclaración local)
     def declare(self, sym: Symbol) -> bool:
+        """
+        Registra un símbolo en este scope.
+
+        Además de guardarlo en la tabla local, marca en el Symbol:
+        - sym.scope       -> este Scope
+        - sym.scope_kind  -> self.kind
+        - sym.is_global   -> True sólo si este scope es el GlobalScope
+        """
         if sym.name in self._symbols:
             return False
+
+        # Enlazar símbolo con su scope de declaración
+        sym.scope = self              # <-- importante para el emitter/IR
+        sym.scope_kind = self.kind    # p.ej. 'global', 'function', ...
+        sym.is_global = (self.kind == "global")
+
         self._symbols[sym.name] = sym
         return True
-    
+
     # alias para legibilidad
     def lookup_current(self, name: str) -> Optional[Symbol]:
         return self.resolve_local(name)
+
     # Búsqueda local
     def resolve_local(self, name: str) -> Optional[Symbol]:
         return self._symbols.get(name)
@@ -42,6 +58,10 @@ class Scope:
         return None
 
     def resolve_with_scope(self, name: str):
+        """
+        Igual que resolve, pero devuelve (símbolo, scope_donde_está).
+        Útil si en algún punto quieres distinguir si vino de global o de local.
+        """
         s: Optional[Scope] = self
         while s is not None:
             hit = s._symbols.get(name)
@@ -131,3 +151,11 @@ class ScopeStack:
 
     def function_path(self) -> list[str]:
         return [s.name for s in self._stack if isinstance(s, FunctionScope)]
+
+    # Conveniencia para el emitter: iterar símbolos globales
+    def iter_globals(self):
+        """
+        Devuelve un iterador (name, Symbol) sobre el Scope global.
+        Útil para generar la sección .data automática.
+        """
+        return self.global_scope.items()

@@ -28,106 +28,111 @@ def _assert_neg(off: int) -> int:
 # =========================
 def emit_prologue(frame_size: int, save_s: List[str] | None = None) -> List[str]:
     """
-    Prólogo estándar.
+    Genera el prólogo estándar de función.
 
-    Convención coherente con FramePlan:
+    Convención de layout en memoria (relativa a $sp NUEVO):
 
-      - FramePlan.frame_size = 8 (old $fp/$ra) + zona negativa (params, locals, spills).
-      - Aquí se puede pasar una lista de $s* a guardar (save_s).
-      - Este helper RESERVA espacio extra para los $s* sin tocar los offsets
-        negativos de homes/locals/spills.
-
-    Layout final en memoria (tras el prólogo):
-
-        # frame_size proviene de FramePlan (8 + negativos)
-        extra_s = 4 * len(save_s)
-        full_frame = frame_size + extra_s
-
-        SP_new = SP_old - full_frame
-        FP     = SP_old
-
-        En offsets relativos a $fp:
-
-        -full_frame($fp)      : old $fp
-        -full_frame+4($fp)    : old $ra
-        -full_frame+8($fp)... : $s0, $s1, ...
+        0($sp)   : old $fp
+        4($sp)   : old $ra
+        8($sp)   : $s0 (si se guarda)
+        12($sp)  : $s1
         ...
-        -8($fp)               : último home/local/spill
-        -4($fp)               : primer home/local/spill
+        8+4k($sp): $s(k)  (en el orden de save_s)
 
-    Es decir:
-      - Los homes/locals/spills siguen en offsets NEGATIVOS cerca de 0.
-      - Los registros salvados viven MÁS ABAJO, en offsets más negativos.
+    Y $fp se coloca al FINAL del frame:
+
+        addiu $sp, $sp, -frame_size
+        sw   $fp, 0($sp)
+        sw   $ra, 4($sp)
+        [sw $s*, 8+4*i($sp)]
+        addiu $fp, $sp, frame_size
+
+    IMPORTANTE:
+      - frame_size DEBE ser al menos negative_size + 8 + 4*len(save_s),
+        donde negative_size es la zona de params/locals/spills descrita por FramePlan.
+      - Esa ampliación se hace en emitter.emit_function calculando frame_bytes.
     """
-    if frame_size <= 0 or frame_size % WORD != 0:
-        raise ValueError("frame_size debe ser múltiplo de 4 y > 0")
-
-    save_s = save_s or []
-    extra_s = WORD * len(save_s)
-    full_frame = frame_size + extra_s
+    if save_s is None:
+        save_s = []
 
     lines: List[str] = []
 
-    # Reservar todo el frame (negativos + old fp/ra + s-regs)
-    lines.append(f"  addiu $sp, $sp, -{full_frame}")
+    # Reserva frame completo
+    lines.append(f"  addiu $sp, $sp, -{frame_size}")
 
-    # Guardar old $fp y old $ra en la base del frame (relativo a $sp)
+    # Guarda old $fp y $ra
     lines.append("  sw $fp, 0($sp)")
     lines.append("  sw $ra, 4($sp)")
 
-    # Guardar $s* inmediatamente después
-    for i, reg in enumerate(save_s):
-        off = 8 + WORD * i
-        lines.append(f"  sw {reg}, {off}($sp)")
+    # Guarda $s* (callee-saved) si corresponde
+    if save_s:
+        off = 8
+        for reg in save_s:
+            lines.append(f"  sw {reg}, {off}($sp)")
+            off += 4
 
-    # Colocar $fp al tope del frame (SP_old)
-    lines.append(f"  addiu $fp, $sp, {full_frame}")
+    # $fp apunta al tope lógico del frame
+    lines.append(f"  addiu $fp, $sp, {frame_size}")
     return lines
 
 
 def emit_epilogue(
     frame_size: int,
-    restore_s: List[str] | None = None,
     *,
+    restore_s: List[str] | None = None,
     exit_main: bool = False,
 ) -> List[str]:
     """
-    Epílogo simétrico a emit_prologue:
+    Genera el epílogo estándar de función.
 
-      - Restaura $s* (si los hubiera).
-      - Restaura $fp y $ra.
-      - Libera todo el frame (incluyendo espacio extra de $s*).
-      - Si exit_main=True → termina el programa.
-      - Si exit_main=False → vuelve por $ra; si $ra==0 → salta a __cps_halt.
+    Layout asumido (igual que en emit_prologue), relativo al $sp actual:
+
+        0($sp)   : old $fp
+        4($sp)   : old $ra
+        8($sp)   : $s0 (si se guardó)
+        12($sp)  : $s1
+        ...
+
+    Secuencia general:
+
+        [lw $s*, 8+4*i($sp)]
+        lw $fp, 0($sp)
+        lw $ra, 4($sp)
+        addiu $sp, $sp, frame_size
+
+        (si exit_main) -> syscall exit
+        (si no)        -> beq $ra, $zero, __cps_halt
+                          nop
+                          jr  $ra
     """
-    if frame_size <= 0 or frame_size % WORD != 0:
-        raise ValueError("frame_size debe ser múltiplo de 4 y > 0")
-
-    restore_s = restore_s or []
-    extra_s = WORD * len(restore_s)
-    full_frame = frame_size + extra_s
+    if restore_s is None:
+        restore_s = []
 
     lines: List[str] = []
 
-    # Restaurar $s* (en el mismo orden y offsets que en el prólogo)
-    for i, reg in enumerate(restore_s):
-        off = 8 + WORD * i
-        lines.append(f"  lw {reg}, {off}($sp)")
+    # Restaurar $s* primero, mientras $sp todavía apunta al inicio del frame
+    if restore_s:
+        off = 8
+        for reg in restore_s:
+            lines.append(f"  lw {reg}, {off}($sp)")
+            off += 4
 
-    # Restaurar $fp y $ra
+    # Restaurar old $fp y old $ra
     lines.append("  lw $fp, 0($sp)")
     lines.append("  lw $ra, 4($sp)")
 
-    # Liberar TODO el frame
-    lines.append(f"  addiu $sp, $sp, {full_frame}")
+    # Liberar frame
+    lines.append(f"  addiu $sp, $sp, {frame_size}")
 
     if exit_main:
-        # Solo main hace exit del programa
+        # main: terminar el programa
         lines.append("  li $v0, 10")
         lines.append("  syscall")
     else:
-        # Cualquier otra función: si $ra==0, no saltar a 0x0
+        # IMPORTANTE: evitar saltar con jr $ra cuando $ra = 0
+        # por el branch delay slot de MIPS/MARS.
         lines.append("  beq $ra, $zero, __cps_halt")
+        lines.append("  nop")
         lines.append("  jr $ra")
 
     return lines
@@ -136,23 +141,23 @@ def emit_epilogue(
 # =========================
 #  PARAM COPY (homes)
 # =========================
-def emit_copy_params_to_homes(homes: list[int], frame_size: int) -> List[str]:
+def emit_copy_params_to_homes(homes: List[int], frame_size: int) -> List[str]:
     """
-    Copia parámetros desde $a0..$a3 a sus 'homes' en el frame.
+    Copia parámetros desde $a0..$a3 a sus "homes" en el frame.
 
-    homes[i] es offset (NEGATIVO) relativo a $fp donde va el parámetro i.
+    `homes[i]` es el offset (relativo a $fp) donde debe quedar el parámetro i.
+    Sólo se usan hasta 4 parámetros ($a0..$a3).
 
-    Se usa después del prólogo, cuando $fp ya apunta al tope del frame y
-    la zona negativa está completamente reservada.
+    Nota: frame_size se pasa solo por simetría, pero aquí no se usa.
     """
     lines: List[str] = []
+    a_regs = ["$a0", "$a1", "$a2", "$a3"]
 
-    upto = min(len(homes), 4)
-    for i in range(upto):
-        off = _assert_neg(homes[i])
-        lines.append(f"  sw $a{i}, {off}($fp)")
+    for i, off in enumerate(homes):
+        if i >= len(a_regs):
+            break
+        lines.append(f"  sw {a_regs[i]}, {off}($fp)")
 
-    # Parámetros extra (i>=4) irían en stack del caller, no se copian aquí.
     return lines
 
 

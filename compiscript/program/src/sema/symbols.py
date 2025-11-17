@@ -15,6 +15,9 @@ class Symbol:
     kind: str = field(default="symbol")
     # Anotación textual del tipo (p. ej., "integer", "string[]", "Perro")
     type_ann: Optional[str] = None
+    scope: Optional["Scope"] = None        # se setea en Scope.declare
+    scope_kind: Optional[str] = None       # 'global', 'function', ...
+    is_global: bool = False 
 
 
 @dataclass

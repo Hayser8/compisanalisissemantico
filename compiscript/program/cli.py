@@ -29,6 +29,7 @@ from src.ir.model import (
 
 # ---- Backend MIPS ----
 from src.backend.mips.emitter import emit_full_program
+from src.backend.mips.string_pool import StringPool
 
 WORD = 4  # tamaño de palabra en MIPS
 
@@ -58,8 +59,23 @@ class GlobalConstPool:
 
 class GlobalAddrTable:
     def __init__(self) -> None:
-        # Puede contener mapas nombreGlobal->valor
+        # nombre_global -> valor_inicial (int)
         self._globals: Dict[str, int] = {}
+
+
+def _build_globals_from_dc(dc: DeclarationCollector) -> GlobalAddrTable:
+    """
+    Crea una GlobalAddrTable con todas las variables / consts
+    declaradas en el scope global del programa.
+    """
+    gtab = GlobalAddrTable()
+    for name, sym in dc.global_scope.items():
+        # Sólo variables y constantes, no funciones/clases
+        if isinstance(sym, (VariableSymbol, ConstSymbol)):
+            # Por ahora inicializamos en 0; el código CPS será el que
+            # luego escriba el valor (por ejemplo, xs = __new_array(...))
+            gtab._globals[name] = 0
+    return gtab
 
 
 # ============================================================
@@ -348,9 +364,11 @@ def _plan_for(fn: Function) -> SimpleFramePlan:
 # Emisión de ASM MIPS (inyectando layouts + obj_types)
 # ============================================================
 
-def emit_mips_asm(prog: Program, layouts=None) -> str:
-    pool = GlobalConstPool()
-    gtab = GlobalAddrTable()
+def emit_mips_asm(prog: Program, layouts=None, gtab=None) -> str:
+    pool = StringPool()
+
+    if gtab is None:
+        gtab = GlobalAddrTable()
 
     if layouts is None:
         layouts = SimpleLayoutRegistry(field_offsets={}, obj_sizes={})
@@ -477,9 +495,11 @@ def main():
     layouts = _build_layouts_from_dc(dc)
     layouts.build_all()
 
+    gtab = _build_globals_from_dc(dc)
+
     if args.emit_mips or args.run_mars:
         try:
-            asm_text = emit_mips_asm(prog, layouts=layouts)
+            asm_text = emit_mips_asm(prog, layouts=layouts, gtab=gtab)
         except Exception as ex:
             print(f"[MIPS] Error generando ASM: {ex}")
             sys.exit(1)

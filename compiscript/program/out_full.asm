@@ -279,6 +279,7 @@ makeMix__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 pokeArray:
@@ -315,6 +316,7 @@ pokeArray__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 sum2:
@@ -336,6 +338,7 @@ sum2__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 factorial:
@@ -376,6 +379,7 @@ factorial__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 fib:
@@ -423,6 +427,7 @@ fib__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 outer:
@@ -446,6 +451,7 @@ outer__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 sumWithLoops:
@@ -589,6 +595,7 @@ sumWithLoops__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 checkSwitch:
@@ -626,6 +633,7 @@ checkSwitch__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 Animal__constructor:
@@ -643,6 +651,7 @@ Animal__constructor__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 Animal__speak:
@@ -661,6 +670,7 @@ Animal__speak__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 Dog__constructor:
@@ -678,6 +688,7 @@ Dog__constructor__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 Dog__bark:
@@ -701,6 +712,7 @@ Dog__bark__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 A__constructor:
@@ -718,6 +730,7 @@ A__constructor__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 A__get:
@@ -744,6 +757,7 @@ A__get__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 sumFirstN:
@@ -792,6 +806,7 @@ sumFirstN__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 runAll:
@@ -920,6 +935,7 @@ runAll__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 256
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra
 
 
@@ -1011,4 +1027,5 @@ inner__epilogue:
   lw $ra, 4($sp)
   addiu $sp, $sp, 16
   beq $ra, $zero, __cps_halt
+  nop
   jr $ra

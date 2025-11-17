@@ -34,7 +34,6 @@ class StringPool:
         out: List[str] = []
         if not self._order:
             return out
-        # No agregamos .data aquí; el caller lo hará una sola vez.
         for s in self._order:
             lab = self._map[s]
             esc = _escape_asciiz(s)

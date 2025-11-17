@@ -1,0 +1,304 @@
+OK ✅  (sin errores)
+[IR-DBG] pokeArray params (lower_from_ast): []
+[IR-DBG] runAll -> pokeArray calls (lower_from_ast):
+  [IR-DBG]   ('call', 'pokeArray', [])
+
+--- IR (TAC) ---
+function makeMix():
+L0:
+  t0 = call __new_array, 3
+  store t0[0], 1
+  store t0[1], 2.0
+  store t0[2], 3
+  mix = t0
+  return mix
+function pokeArray():
+L0:
+  store xs[0], 42
+  t0 = load ys[1]
+  t1 = t0 + 0.5
+  store ys[1], t1
+function sum2(x, y):
+L0:
+  t0 = x + y
+  return t0
+function factorial(n):
+L0:
+  t0 = n <= 1
+  if t0 goto L1_then
+  goto L2_end
+L1_then:
+  return 1
+  goto L2_end
+L2_end:
+  t1 = n - 1
+  t2 = call factorial, t1
+  t3 = n * t2
+  return t3
+function fib(n):
+L0:
+  t0 = n <= 1
+  if t0 goto L1_then
+  goto L2_end
+L1_then:
+  return n
+  goto L2_end
+L2_end:
+  t1 = n - 1
+  t2 = call fib, t1
+  t3 = n - 2
+  t4 = call fib, t3
+  t5 = t2 + t4
+  return t5
+function outer(a0):
+L0:
+  bias = 10
+  t0 = call inner, 5
+  return t0
+function sumWithLoops():
+L0:
+  acc = 0
+  i = 0
+  goto L1_while_head
+L1_while_head:
+  t0 = i < 4
+  if t0 goto L2_while_body
+  goto L3_while_end
+L2_while_body:
+  t1 = load xs[i]
+  t2 = acc + t1
+  acc = t2
+  t3 = i + 1
+  i = t3
+  goto L1_while_head
+L3_while_end:
+  j = 0
+L4_do_body:
+  t4 = acc + j
+  acc = t4
+  t5 = j + 1
+  j = t5
+L5_do_head:
+  t6 = j < 2
+  if t6 goto L4_do_body
+  goto L6_do_end
+L6_do_end:
+  k = 0
+  goto L7_while_head
+L7_while_head:
+  t7 = k < 3
+  if t7 goto L8_while_body
+  goto L9_while_end
+L8_while_body:
+  t8 = k == 1
+  if t8 goto L10_then
+  goto L11_end
+L10_then:
+  t9 = k + 1
+  k = t9
+  goto L7_while_head
+  goto L11_end
+L11_end:
+  t10 = k > 1
+  if t10 goto L12_then
+  goto L13_end
+L12_then:
+  goto L9_while_end
+  goto L13_end
+L13_end:
+  t11 = acc + k
+  acc = t11
+  t12 = k + 1
+  k = t12
+  goto L7_while_head
+L9_while_end:
+  ix = 0
+  goto L14_while_head
+L14_while_head:
+  t13 = ix < 4
+  if t13 goto L15_while_body
+  goto L16_while_end
+L15_while_body:
+  t14 = load xs[ix]
+  t15 = acc + t14
+  acc = t15
+  t16 = ix + 1
+  ix = t16
+  goto L14_while_head
+L16_while_end:
+  return acc
+function checkSwitch(v):
+L0:
+  t0 = v > 10
+  t1 = true == t0
+  if t1 goto L1_case
+  goto L2_switch_default
+L1_case:
+  return 1
+  goto L3_switch_end
+L2_switch_default:
+  return 0
+  goto L3_switch_end
+L3_switch_end:
+  return 0
+function Animal::constructor(this, n):
+L0:
+  set this.name, n
+function Animal::speak(this):
+L0:
+  t0 = get this.name
+  return t0
+function Dog::constructor(this, n):
+L0:
+  set this.name, n
+function Dog::bark(this):
+L0:
+  t0 = call __mcall__speak, this
+  t1 = t0 + " guau"
+  return t1
+function A::constructor(this, v):
+L0:
+  set this.v, v
+function A::get(this):
+L0:
+  t0 = get this.v
+  t1 = get this.K
+  t2 = t0 + t1
+  t3 = t2 - 7
+  return t3
+function sumFirstN(arr, n):
+L0:
+  s = 0
+  i = 0
+  goto L1_while_head
+L1_while_head:
+  t0 = i < n
+  if t0 goto L2_while_body
+  goto L3_while_end
+L2_while_body:
+  t1 = load arr[i]
+  t2 = s + t1
+  s = t2
+  t3 = i + 1
+  i = t3
+  goto L1_while_head
+L3_while_end:
+  return s
+function runAll():
+L0:
+  t0 = call pokeArray
+  t1 = call sum2, a, 2
+  r1 = t1
+  t2 = call factorial, 6
+  r2 = t2
+  t3 = call fib, 8
+  r3 = t3
+  t4 = call outer, 3
+  r4 = t4
+  t5 = call sumWithLoops
+  r5 = t5
+  t6 = new A(10)
+  o = t6
+  t7 = call __mcall__get, o
+  got = t7
+  t8 = call checkSwitch, 5
+  sw = t8
+  t9 = call makeMix
+  mm = t9
+  t10 = load mm[0]
+  m0 = t10
+  t11 = call sumFirstN, xs, 3
+  sx = t11
+  t12 = call __mcall__bark, d1
+  voice = t12
+  t13 = r1 + r2
+  t14 = t13 + r3
+  t15 = t14 + r4
+  t16 = t15 + r5
+  t17 = t16 + got
+  t18 = t17 + sw
+  t19 = t18 + sx
+  total = t19
+  t20 = voice == "Fido guau"
+  if t20 goto L1_then
+  goto L2_end
+L1_then:
+  t21 = total + 1
+  total = t21
+  goto L2_end
+L2_end:
+  return total
+function main():
+L0:
+  PI = 3.1415926
+  a = 3
+  b = a
+  s = "hola"
+  t0 = s + " mundo"
+  t = t0
+  t1 = call __new_array, 4
+  store t1[0], 1
+  store t1[1], 2
+  store t1[2], 3
+  store t1[3], 4
+  xs = t1
+  t2 = call __new_array, 3
+  store t2[0], 1.0
+  store t2[1], 2.0
+  store t2[2], 3.5
+  ys = t2
+  t3 = call __new_array, 2
+  t4 = call __new_array, 2
+  store t4[0], 1
+  store t4[1], 2
+  store t3[0], t4
+  t5 = call __new_array, 2
+  store t5[0], 3
+  store t5[1], 4
+  store t3[1], t5
+  grid = t3
+  t6 = load grid[1]
+  t7 = load t6[1]
+  g11 = t7
+  t8 = 1.0 + a
+  sumNum = t8
+  t9 = a * 2
+  t10 = t9 / 3.0
+  prod = t10
+  t11 = 10 - 7
+  rest = t11
+  t12 = 5.0 % 2
+  modOk = t12
+  t13 = a < 10
+  t14 = s == "hola"
+  t15 = t13 && t14
+  t16 = ! false
+  t17 = t15 || t16
+  flag = t17
+  t18 = a > 0
+  if t18 goto L1_then
+  goto L2_else
+L1_then:
+  t19 = a
+  goto L3_end
+L2_else:
+  t19 = 0
+  goto L3_end
+L3_end:
+  tern = t19
+  t20 = new Dog("Fido")
+  d1 = t20
+  t21 = new Dog("Rex")
+  d2 = t21
+  t22 = call __new_array, 2
+  store t22[0], d1
+  store t22[1], d2
+  pack = t22
+  t23 = load pack[0]
+  t24 = call __mcall__bark, t23
+  firstVoice = t24
+  t25 = call runAll
+  FINAL = t25
+[IR-DBG] pokeArray params (lower_from_ast): []
+[IR-DBG] runAll -> pokeArray calls (lower_from_ast):
+  [IR-DBG]   ('call', 'pokeArray', [])
