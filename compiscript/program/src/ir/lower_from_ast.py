@@ -457,24 +457,5 @@ def lower_program(prog: A.Program) -> List[Tuple[str, List[str], StmtT]]:
         body = ('block', [lower_stmt(s) for s in loose])
         functions.append(("main", [], body))
 
-    # =============== MINI-DEBUG: pokeArray y runAll =================
-    if _IR_DEBUG:
-        by_name = {fn_name: (params, body) for (fn_name, params, body) in functions}
-
-        if "pokeArray" in by_name:
-            params, body = by_name["pokeArray"]
-            print(f"[IR-DBG] pokeArray params (lower_from_ast): {params}", file=sys.stdout)
-
-        if "runAll" in by_name:
-            params, body = by_name["runAll"]
-            calls: List[ExprT] = []
-            _collect_calls_in_stmt(body, "pokeArray", calls)
-            print("[IR-DBG] runAll -> pokeArray calls (lower_from_ast):", file=sys.stdout)
-            if not calls:
-                print("  [IR-DBG]   <sin llamadas a pokeArray encontradas>", file=sys.stdout)
-            else:
-                for c in calls:
-                    print(f"  [IR-DBG]   {c}", file=sys.stdout)
-    # ================================================================
 
     return functions

@@ -465,7 +465,6 @@ def main():
         print(rep.summary())
         sys.exit(1)
 
-    print("OK ✅  (sin errores)")
     if args.symbols:
         print(json.dumps(_serialize_symbols(dc), ensure_ascii=False, indent=2))
 
@@ -504,7 +503,6 @@ def main():
             print(f"[MIPS] Error generando ASM: {ex}")
             sys.exit(1)
 
-        print("\n--- MIPS ASM ---")
         print(asm_text)
 
         if args.run_mars:

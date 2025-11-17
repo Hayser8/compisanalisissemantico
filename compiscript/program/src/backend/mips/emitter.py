@@ -80,7 +80,7 @@ print_str__epilogue:
   jr $ra
 """
 
-    # 🔁 Resto de funciones desconocidas: stub genérico como antes
+    # Resto de funciones desconocidas: stub genérico
     return f"""{name}:
   # Auto-generated stub: returns its first argument (a0) unchanged
   addiu $sp, $sp, -16
@@ -138,7 +138,8 @@ def _mangle_label(name: str) -> str:
 
 
 def _dbg(msg: str) -> None:
-    print(f"[EMITTER] {msg}", file=sys.stdout)
+    # Debug desactivado para no ensuciar la salida de ASM
+    return
 
 
 # ---------------------------------------------------------------------
@@ -262,13 +263,12 @@ def emit_function(
         )[:8]
         ra.pin_names_to_sregs(names_to_pin)
 
-    # ---- logging de debug amigable ----
+    # ---- logging de debug (actualmente desactivado por _dbg no-op) ----
     _dbg(f"fn={fn.name} frame_size(plan)={plan.frame_size} has_calls={has_calls}")
     try:
         _dbg(f"  s_regs_in_use={getattr(ra, 's_regs_in_use', [])}")
     except Exception:
         pass
-    # NUEVO: nombres de parámetros que ve el emitter
     try:
         pnames = [
             getattr(p, "name", None) or getattr(p, "id", None) or str(p)
@@ -570,21 +570,14 @@ def emit_full_program(
             global_names=global_names,
         )
 
-        _dbg(f"===== ASM for {fn.name} (frame(plan)={plan.frame_size}) =====")
-        for i, ln in enumerate(asm_fn.splitlines()):
-            if i >= 120:
-                _dbg("  ... <truncated> ...")
-                break
-            print(f"    {ln}", file=sys.stdout)
-        _dbg(f"===== END ASM for {fn.name} =====")
-
+        # Ya no se imprime el ASM por función; solo se acumula
         text_chunks.append(asm_fn if asm_fn.endswith("\n") else asm_fn + "\n")
 
     # ----- 4) Sección .data -----
     lines: List[str] = []
     lines.append(".data")
 
-    # Globals (mesmas que usará RegAlloc luego como labels)
+    # Globals (mismas que usará RegAlloc luego como labels)
     for name, val in global_pairs:
         lines.append(f"{name}: .word {val}")
 
@@ -665,7 +658,7 @@ def emit_full_program(
         "  addiu $t4, $t4, 1\n"
         "  j    __str_len2_loop\n"
         "__str_len2_done:\n"
-        "  # total = len1 + len2 + 1 (para '\\0') en t6\n"
+        "  # total = len1 + len2 + 1 (para '\\0')\n"
         "  addu $t6, $t2, $t3\n"
         "  addiu $t6, $t6, 1\n"
         "  # pedir memoria con sbrk\n"
