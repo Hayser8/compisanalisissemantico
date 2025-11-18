@@ -5,7 +5,7 @@ let a: integer = 3;
 let b: float = a;               // int -> float implícito
 let s: string = "hola";
 let t: string = s + " mundo";   // concat de strings
-
+print(t);
 let xs: integer[] = [1, 2, 3, 4];
 let ys: float[]   = [1.0, 2.0, 3.5];
 
